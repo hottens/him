@@ -19,7 +19,7 @@ def get_model():
     """Get the Gemini model instance."""
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY environment variable is not set")
-    return genai.GenerativeModel('gemini-pro')
+    return genai.GenerativeModel('gemini-2.5-flash-lite')
 
 
 def generate_recipe_suggestions(inventory_items: list[str], query: Optional[str] = None) -> dict:
