@@ -1,0 +1,14 @@
+# Ignore development/local files
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+.env
+*.md
+.venv
+venv
+data/
+*.db
+.DS_Store
+

@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Home Inventory</title>
+    
+    <!-- html5-qrcode library for barcode scanning -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-orange: #d29922;
+            --accent-red: #f85149;
+            --border-color: #30363d;
+            --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+
+        /* Header */
+        header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        header h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        header h1::before {
+            content: "📦";
+        }
+
+        /* Navigation Tabs */
+        .tabs {
+            display: flex;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            overflow-x: auto;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 0.875rem 1rem;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .tab:hover {
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+
+        .tab.active {
+            color: var(--accent-blue);
+            border-bottom-color: var(--accent-blue);
+        }
+
+        .tab .count {
+            background: var(--bg-tertiary);
+            padding: 0.125rem 0.5rem;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            margin-left: 0.5rem;
+        }
+
+        .tab.active .count {
+            background: var(--accent-blue);
+            color: var(--bg-primary);
+        }
+
+        /* Main Content */
+        main {
+            padding: 1rem;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .panel {
+            display: none;
+        }
+
+        .panel.active {
+            display: block;
+        }
+
+        /* Scanner Section */
+        #scanner-container {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            margin-bottom: 1rem;
+        }
+
+        #reader {
+            width: 100%;
+        }
+
+        #reader video {
+            border-radius: 12px 12px 0 0;
+        }
+
+        .scanner-controls {
+            padding: 1rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .scanner-result {
+            padding: 1rem;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border-color);
+            font-family: var(--font-mono);
+            font-size: 0.875rem;
+        }
+
+        .scanner-result.success {
+            border-left: 3px solid var(--accent-green);
+        }
+
+        .scanner-result.new {
+            border-left: 3px solid var(--accent-orange);
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 0.625rem 1rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn:hover {
+            background: var(--bg-secondary);
+            border-color: var(--text-secondary);
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-primary {
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #4c9aed;
+            border-color: #4c9aed;
+        }
+
+        .btn-success {
+            background: var(--accent-green);
+            border-color: var(--accent-green);
+            color: #fff;
+        }
+
+        .btn-success:hover {
+            background: #36a348;
+            border-color: #36a348;
+        }
+
+        .btn-warning {
+            background: var(--accent-orange);
+            border-color: var(--accent-orange);
+            color: #fff;
+        }
+
+        .btn-warning:hover {
+            background: #bf8a1f;
+            border-color: #bf8a1f;
+        }
+
+        .btn-block {
+            width: 100%;
+            justify-content: center;
+        }
+
+        /* Item List */
+        .item-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .item-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .item-card:hover {
+            border-color: var(--text-secondary);
+        }
+
+        .item-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .item-name {
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+            word-break: break-word;
+        }
+
+        .item-barcodes {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+        }
+
+        .item-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-shrink: 0;
+        }
+
+        .item-actions .btn {
+            padding: 0.5rem;
+            font-size: 1rem;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            z-index: 1000;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            width: 100%;
+            max-width: 400px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-header h2 {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0.25rem;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            padding: 1rem;
+        }
+
+        .modal-footer {
+            padding: 1rem;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+        }
+
+        /* Forms */
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.625rem 0.875rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 1rem;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .form-input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        /* Location Buttons in Modal */
+        .location-buttons {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .location-buttons .btn {
+            flex: 1;
+            justify-content: center;
+        }
+
+        /* Item Search Results */
+        .search-results {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 0.5rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+        }
+
+        .search-result-item {
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+
+        .search-result-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .search-result-item.selected {
+            background: var(--accent-blue);
+            color: #fff;
+        }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 1rem;
+            left: 1rem;
+            right: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            z-index: 2000;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.875rem 1rem;
+            font-size: 0.875rem;
+            animation: slideUp 0.3s ease-out;
+            pointer-events: auto;
+        }
+
+        .toast.success {
+            border-left: 3px solid var(--accent-green);
+        }
+
+        .toast.error {
+            border-left: 3px solid var(--accent-red);
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(1rem);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Mode Indicator */
+        .scan-mode {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .scan-mode-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .scan-mode-value {
+            font-weight: 600;
+            font-size: 0.875rem;
+        }
+
+        .scan-mode-value.inventory {
+            color: var(--accent-green);
+        }
+
+        .scan-mode-value.grocery {
+            color: var(--accent-orange);
+        }
+
+        /* Mode Selection Buttons */
+        .mode-buttons {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .mode-buttons .btn {
+            flex: 1;
+            justify-content: center;
+        }
+
+        .mode-buttons .btn.active {
+            box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px currentColor;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 400px) {
+            .item-actions {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Home Inventory</h1>
+    </header>
+
+    <nav class="tabs">
+        <button class="tab active" data-panel="scanner">
+            📷 Scanner
+        </button>
+        <button class="tab" data-panel="inventory">
+            🏠 Inventory<span class="count" id="inventory-count">0</span>
+        </button>
+        <button class="tab" data-panel="grocery">
+            🛒 Grocery<span class="count" id="grocery-count">0</span>
+        </button>
+    </nav>
+
+    <main>
+        <!-- Scanner Panel -->
+        <div id="scanner" class="panel active">
+            <div class="mode-buttons">
+                <button class="btn btn-success active" id="mode-inventory" onclick="setScanMode('inventory')">
+                    🏠 Add to Inventory
+                </button>
+                <button class="btn btn-warning" id="mode-grocery" onclick="setScanMode('grocery_list')">
+                    🛒 Add to Grocery
+                </button>
+            </div>
+
+            <div class="scan-mode">
+                <span class="scan-mode-label">Scan mode:</span>
+                <span class="scan-mode-value inventory" id="current-mode">Inventory</span>
+            </div>
+
+            <div id="scanner-container">
+                <div id="reader"></div>
+                <div class="scanner-controls">
+                    <button class="btn btn-primary btn-block" id="start-scanner" onclick="toggleScanner()">
+                        📷 Start Scanner
+                    </button>
+                </div>
+                <div id="scanner-result" class="scanner-result" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- Inventory Panel -->
+        <div id="inventory" class="panel">
+            <div id="inventory-list" class="item-list"></div>
+        </div>
+
+        <!-- Grocery Panel -->
+        <div id="grocery" class="panel">
+            <div id="grocery-list" class="item-list"></div>
+        </div>
+    </main>
+
+    <!-- New Item Modal -->
+    <div class="modal-overlay" id="new-item-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>New Barcode Scanned</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Barcode</label>
+                    <input type="text" class="form-input" id="modal-barcode" readonly>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Item Name</label>
+                    <input type="text" class="form-input" id="modal-item-name" 
+                           placeholder="Enter item name or search existing...">
+                    <div class="search-results" id="search-results" style="display: none;"></div>
+                </div>
+
+                <div class="location-buttons">
+                    <button class="btn btn-success" onclick="createItem('inventory')">
+                        🏠 Inventory
+                    </button>
+                    <button class="btn btn-warning" onclick="createItem('grocery_list')">
+                        🛒 Grocery
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        // State
+        let html5QrCode = null;
+        let isScanning = false;
+        let currentScanMode = 'inventory'; // 'inventory' or 'grocery_list'
+        let pendingBarcode = null;
+        let selectedExistingItem = null;
+
+        // API base URL
+        const API_BASE = '/api';
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set up tab navigation
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', () => switchPanel(tab.dataset.panel));
+            });
+
+            // Set up item name search
+            const itemNameInput = document.getElementById('modal-item-name');
+            let searchTimeout;
+            itemNameInput.addEventListener('input', () => {
+                clearTimeout(searchTimeout);
+                selectedExistingItem = null;
+                searchTimeout = setTimeout(() => searchItems(itemNameInput.value), 300);
+            });
+
+            // Load initial data
+            loadInventory();
+            loadGrocery();
+        });
+
+        // Panel Navigation
+        function switchPanel(panelId) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            
+            document.querySelector(`[data-panel="${panelId}"]`).classList.add('active');
+            document.getElementById(panelId).classList.add('active');
+
+            // Stop scanner when leaving scanner panel
+            if (panelId !== 'scanner' && isScanning) {
+                stopScanner();
+            }
+        }
+
+        // Scan Mode
+        function setScanMode(mode) {
+            currentScanMode = mode;
+            const modeIndicator = document.getElementById('current-mode');
+            const inventoryBtn = document.getElementById('mode-inventory');
+            const groceryBtn = document.getElementById('mode-grocery');
+
+            if (mode === 'inventory') {
+                modeIndicator.textContent = 'Inventory';
+                modeIndicator.className = 'scan-mode-value inventory';
+                inventoryBtn.classList.add('active');
+                groceryBtn.classList.remove('active');
+            } else {
+                modeIndicator.textContent = 'Grocery List';
+                modeIndicator.className = 'scan-mode-value grocery';
+                groceryBtn.classList.add('active');
+                inventoryBtn.classList.remove('active');
+            }
+        }
+
+        // Scanner Functions
+        async function toggleScanner() {
+            if (isScanning) {
+                await stopScanner();
+            } else {
+                await startScanner();
+            }
+        }
+
+        async function startScanner() {
+            const btn = document.getElementById('start-scanner');
+            
+            try {
+                html5QrCode = new Html5Qrcode("reader");
+                
+                await html5QrCode.start(
+                    { facingMode: "environment" },
+                    {
+                        fps: 10,
+                        qrbox: { width: 250, height: 100 },
+                        aspectRatio: 1.0
+                    },
+                    onScanSuccess,
+                    onScanFailure
+                );
+                
+                isScanning = true;
+                btn.textContent = '⏹ Stop Scanner';
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn');
+            } catch (err) {
+                console.error('Failed to start scanner:', err);
+                showToast('Failed to start camera. Please ensure camera permissions are granted.', 'error');
+            }
+        }
+
+        async function stopScanner() {
+            const btn = document.getElementById('start-scanner');
+            
+            if (html5QrCode && isScanning) {
+                try {
+                    await html5QrCode.stop();
+                } catch (err) {
+                    console.error('Error stopping scanner:', err);
+                }
+            }
+            
+            isScanning = false;
+            btn.textContent = '📷 Start Scanner';
+            btn.classList.add('btn-primary');
+        }
+
+        function onScanSuccess(decodedText, decodedResult) {
+            // Provide haptic feedback if available
+            if (navigator.vibrate) {
+                navigator.vibrate(100);
+            }
+
+            // Look up the barcode
+            lookupBarcode(decodedText);
+        }
+
+        function onScanFailure(error) {
+            // Ignore scan failures (no barcode detected)
+        }
+
+        // Barcode Lookup
+        async function lookupBarcode(code) {
+            const resultDiv = document.getElementById('scanner-result');
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = `Looking up: ${code}...`;
+            resultDiv.className = 'scanner-result';
+
+            try {
+                const response = await fetch(`${API_BASE}/barcode/${encodeURIComponent(code)}`);
+                const data = await response.json();
+
+                if (data.found) {
+                    // Known barcode - move item to current mode location
+                    resultDiv.innerHTML = `✓ Found: <strong>${data.item.name}</strong>`;
+                    resultDiv.className = 'scanner-result success';
+                    
+                    await moveItem(data.item.id, currentScanMode);
+                    showToast(`${data.item.name} → ${currentScanMode === 'inventory' ? 'Inventory' : 'Grocery List'}`, 'success');
+                    
+                    loadInventory();
+                    loadGrocery();
+                } else {
+                    // Unknown barcode - show modal
+                    resultDiv.innerHTML = `⚠ New barcode: <strong>${code}</strong>`;
+                    resultDiv.className = 'scanner-result new';
+                    
+                    showNewItemModal(code);
+                }
+            } catch (err) {
+                console.error('Error looking up barcode:', err);
+                resultDiv.textContent = `Error: ${err.message}`;
+                showToast('Failed to look up barcode', 'error');
+            }
+        }
+
+        // Modal Functions
+        function showNewItemModal(barcode) {
+            pendingBarcode = barcode;
+            selectedExistingItem = null;
+            
+            document.getElementById('modal-barcode').value = barcode;
+            document.getElementById('modal-item-name').value = '';
+            document.getElementById('search-results').style.display = 'none';
+            document.getElementById('new-item-modal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('new-item-modal').classList.remove('active');
+            pendingBarcode = null;
+            selectedExistingItem = null;
+        }
+
+        async function searchItems(query) {
+            const resultsDiv = document.getElementById('search-results');
+            
+            if (!query || query.length < 2) {
+                resultsDiv.style.display = 'none';
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
+                const items = await response.json();
+
+                if (items.length === 0) {
+                    resultsDiv.style.display = 'none';
+                    return;
+                }
+
+                resultsDiv.innerHTML = items.map(item => `
+                    <div class="search-result-item" onclick="selectExistingItem(${item.id}, '${item.name.replace(/'/g, "\\'")}')">
+                        ${item.name}
+                        <small style="color: var(--text-secondary); display: block;">
+                            ${item.location === 'inventory' ? '🏠 In inventory' : 
+                              item.location === 'grocery_list' ? '🛒 On grocery list' : 
+                              'Not tracked'}
+                        </small>
+                    </div>
+                `).join('');
+                resultsDiv.style.display = 'block';
+            } catch (err) {
+                console.error('Error searching items:', err);
+            }
+        }
+
+        function selectExistingItem(id, name) {
+            selectedExistingItem = { id, name };
+            document.getElementById('modal-item-name').value = name;
+            document.getElementById('search-results').style.display = 'none';
+            
+            // Highlight selection
+            document.querySelectorAll('.search-result-item').forEach(el => {
+                el.classList.remove('selected');
+            });
+        }
+
+        async function createItem(location) {
+            const itemName = document.getElementById('modal-item-name').value.trim();
+            
+            if (!itemName) {
+                showToast('Please enter an item name', 'error');
+                return;
+            }
+
+            try {
+                if (selectedExistingItem) {
+                    // Associate barcode with existing item
+                    await fetch(`${API_BASE}/barcode/associate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            barcode: pendingBarcode,
+                            item_id: selectedExistingItem.id
+                        })
+                    });
+                    
+                    // Move to selected location
+                    await moveItem(selectedExistingItem.id, location);
+                    showToast(`Added barcode to ${selectedExistingItem.name}`, 'success');
+                } else {
+                    // Create new item
+                    const response = await fetch(`${API_BASE}/items`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name: itemName,
+                            location: location,
+                            barcode: pendingBarcode
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.detail || 'Failed to create item');
+                    }
+
+                    showToast(`Created: ${itemName}`, 'success');
+                }
+
+                closeModal();
+                loadInventory();
+                loadGrocery();
+            } catch (err) {
+                console.error('Error creating item:', err);
+                showToast(err.message, 'error');
+            }
+        }
+
+        // Item Management
+        async function moveItem(itemId, location) {
+            const endpoint = location === 'inventory' ? 'to-inventory' : 'to-grocery';
+            
+            try {
+                const response = await fetch(`${API_BASE}/items/${itemId}/${endpoint}`, {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to move item');
+                }
+
+                loadInventory();
+                loadGrocery();
+            } catch (err) {
+                console.error('Error moving item:', err);
+                showToast('Failed to move item', 'error');
+            }
+        }
+
+        async function removeItem(itemId) {
+            try {
+                await fetch(`${API_BASE}/items/${itemId}/remove`, { method: 'POST' });
+                showToast('Item removed from lists', 'success');
+                loadInventory();
+                loadGrocery();
+            } catch (err) {
+                console.error('Error removing item:', err);
+                showToast('Failed to remove item', 'error');
+            }
+        }
+
+        // Load Lists
+        async function loadInventory() {
+            try {
+                const response = await fetch(`${API_BASE}/inventory`);
+                const data = await response.json();
+                
+                document.getElementById('inventory-count').textContent = data.count;
+                
+                const listDiv = document.getElementById('inventory-list');
+                if (data.items.length === 0) {
+                    listDiv.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🏠</div>
+                            <p>No items in inventory</p>
+                            <p style="font-size: 0.875rem; margin-top: 0.5rem;">
+                                Scan a barcode to add items
+                            </p>
+                        </div>
+                    `;
+                } else {
+                    listDiv.innerHTML = data.items.map(item => renderItemCard(item, 'inventory')).join('');
+                }
+            } catch (err) {
+                console.error('Error loading inventory:', err);
+            }
+        }
+
+        async function loadGrocery() {
+            try {
+                const response = await fetch(`${API_BASE}/grocery`);
+                const data = await response.json();
+                
+                document.getElementById('grocery-count').textContent = data.count;
+                
+                const listDiv = document.getElementById('grocery-list');
+                if (data.items.length === 0) {
+                    listDiv.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🛒</div>
+                            <p>Grocery list is empty</p>
+                            <p style="font-size: 0.875rem; margin-top: 0.5rem;">
+                                Items you need to restock will appear here
+                            </p>
+                        </div>
+                    `;
+                } else {
+                    listDiv.innerHTML = data.items.map(item => renderItemCard(item, 'grocery')).join('');
+                }
+            } catch (err) {
+                console.error('Error loading grocery list:', err);
+            }
+        }
+
+        function renderItemCard(item, currentList) {
+            const barcodes = item.barcodes.map(b => b.code).join(', ');
+            
+            return `
+                <div class="item-card">
+                    <div class="item-info">
+                        <div class="item-name">${item.name}</div>
+                        ${barcodes ? `<div class="item-barcodes">${barcodes}</div>` : ''}
+                    </div>
+                    <div class="item-actions">
+                        ${currentList === 'inventory' ? `
+                            <button class="btn btn-warning" onclick="moveItem(${item.id}, 'grocery_list')" title="Move to Grocery List">
+                                🛒
+                            </button>
+                        ` : `
+                            <button class="btn btn-success" onclick="moveItem(${item.id}, 'inventory')" title="Move to Inventory">
+                                🏠
+                            </button>
+                        `}
+                        <button class="btn" onclick="removeItem(${item.id})" title="Remove from lists">
+                            ✕
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Toast Notifications
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.remove();
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
+
