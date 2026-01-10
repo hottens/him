@@ -308,7 +308,7 @@ async def list_recipes(
     """List all saved recipes."""
     query = db.query(Recipe)
     if favorites_only:
-        query = query.filter(Recipe.is_favorite == True)
+        query = query.filter(Recipe.is_favorite.is_(True))
     recipes = query.order_by(Recipe.created_at.desc()).all()
     return schemas.RecipeListResponse(count=len(recipes), recipes=recipes)
 
@@ -480,7 +480,7 @@ async def get_grocery_suggestions(
     item_names = [item.name for item in inventory_items]
     
     # Get favorite recipes with their ingredients
-    favorite_recipes = db.query(Recipe).filter(Recipe.is_favorite == True).all()
+    favorite_recipes = db.query(Recipe).filter(Recipe.is_favorite.is_(True)).all()
     recipes_data = []
     for recipe in favorite_recipes:
         recipes_data.append({
@@ -509,16 +509,29 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
     
+    # Get inventory items for ingredient availability check
+    inventory_items = db.query(Item).filter(Item.location == ItemLocation.INVENTORY).all()
+    inventory_names = {item.name.lower() for item in inventory_items}
+    
     # Sort steps by step_number
     sorted_steps = sorted(recipe.steps, key=lambda s: s.step_number)
     
-    # Generate ingredients HTML
+    # Generate ingredients HTML with availability status
     ingredients_html = ""
+    missing_ingredients = []
     for ing in recipe.ingredients:
         amount_str = f"{ing.amount} " if ing.amount else ""
         unit_str = f"{ing.unit} " if ing.unit else ""
         notes_str = f" <span class='notes'>({ing.notes})</span>" if ing.notes else ""
-        ingredients_html += f"<li>{amount_str}{unit_str}{ing.name}{notes_str}</li>"
+        
+        is_available = ing.name.lower() in inventory_names
+        status_icon = "✓" if is_available else "✗"
+        status_class = "available" if is_available else "missing"
+        
+        if not is_available:
+            missing_ingredients.append(ing.name)
+        
+        ingredients_html += f"<li class='{status_class}'><span class='status-icon'>{status_icon}</span> {amount_str}{unit_str}{ing.name}{notes_str}</li>"
     
     # Generate steps HTML
     steps_html = ""
@@ -528,6 +541,28 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     # Calculate total time
     total_time = (recipe.prep_time_minutes or 0) + (recipe.cook_time_minutes or 0)
     time_str = f"{total_time} min" if total_time else "—"
+    
+    # Missing ingredients JSON for JavaScript
+    import json
+    missing_json = json.dumps(missing_ingredients)
+    
+    # Availability summary
+    total_ingredients = len(recipe.ingredients)
+    available_count = total_ingredients - len(missing_ingredients)
+    
+    if total_ingredients == 0:
+        availability_html = ""
+    elif len(missing_ingredients) == 0:
+        availability_html = f'<div class="availability-banner complete">✓ All {total_ingredients} ingredients in stock!</div>'
+    else:
+        availability_html = f'''
+        <div class="availability-banner partial">
+            <span>◐ {available_count}/{total_ingredients} ingredients in stock</span>
+            <button class="add-missing-btn" onclick="addMissingToGrocery()">
+                🛒 Add {len(missing_ingredients)} missing to grocery
+            </button>
+        </div>
+        '''
     
     html = f"""
 <!DOCTYPE html>
@@ -543,6 +578,8 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             --text: #1a1a1a;
             --text-muted: #666;
             --accent: #c45c26;
+            --accent-green: #3fb950;
+            --accent-red: #f85149;
             --border: #e5e3df;
         }}
         
@@ -556,6 +593,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             padding: 2rem 1rem;
             max-width: 680px;
             margin: 0 auto;
+            padding-bottom: 5rem;
         }}
         
         .back-link {{
@@ -618,6 +656,48 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             color: var(--accent);
         }}
         
+        .availability-banner {{
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }}
+        
+        .availability-banner.complete {{
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-green);
+        }}
+        
+        .availability-banner.partial {{
+            background: rgba(210, 153, 34, 0.15);
+            color: #bf8a1f;
+        }}
+        
+        .add-missing-btn {{
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        
+        .add-missing-btn:hover {{
+            opacity: 0.9;
+            transform: scale(1.02);
+        }}
+        
+        .add-missing-btn:disabled {{
+            opacity: 0.5;
+            cursor: not-allowed;
+        }}
+        
         .ingredients {{
             background: #fff;
             border: 1px solid var(--border);
@@ -632,9 +712,16 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         .ingredients li {{
             padding: 0.5rem 0;
             border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
         }}
         
         .ingredients li:last-child {{ border-bottom: none; }}
+        
+        .ingredients li.available .status-icon {{ color: var(--accent-green); }}
+        .ingredients li.missing .status-icon {{ color: var(--accent-red); }}
+        .ingredients li.missing {{ opacity: 0.7; }}
         
         .ingredients .notes {{
             color: var(--text-muted);
@@ -675,9 +762,34 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             transform: scale(1.1);
         }}
         
+        .toast {{
+            position: fixed;
+            bottom: 6rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: #fff;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            display: none;
+            z-index: 1000;
+        }}
+        
+        .toast.show {{
+            display: block;
+            animation: fadeInUp 0.3s ease-out;
+        }}
+        
+        @keyframes fadeInUp {{
+            from {{ opacity: 0; transform: translate(-50%, 1rem); }}
+            to {{ opacity: 1; transform: translate(-50%, 0); }}
+        }}
+        
         @media (max-width: 480px) {{
             h1 {{ font-size: 2rem; }}
             .meta {{ gap: 1rem; flex-wrap: wrap; }}
+            .availability-banner {{ flex-direction: column; align-items: stretch; text-align: center; }}
         }}
     </style>
 </head>
@@ -708,6 +820,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     </div>
     
     <h2>Ingredients</h2>
+    {availability_html}
     <div class="ingredients">
         <ul>
             {ingredients_html}
@@ -725,10 +838,64 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         {'★' if recipe.is_favorite else '☆'}
     </button>
     
+    <div class="toast" id="toast"></div>
+    
     <script>
+        const missingIngredients = {missing_json};
+        
         async function toggleFavorite() {{
             await fetch('/api/recipes/{recipe.id}/favorite', {{ method: 'POST' }});
             location.reload();
+        }}
+        
+        async function addMissingToGrocery() {{
+            const btn = document.querySelector('.add-missing-btn');
+            btn.disabled = true;
+            btn.textContent = 'Adding...';
+            
+            let added = 0;
+            for (const ingredientName of missingIngredients) {{
+                try {{
+                    // First check if item exists
+                    const searchRes = await fetch(`/api/search?q=${{encodeURIComponent(ingredientName)}}`);
+                    const searchData = await searchRes.json();
+                    
+                    const exactMatch = searchData.find(item => 
+                        item.name.toLowerCase() === ingredientName.toLowerCase()
+                    );
+                    
+                    if (exactMatch) {{
+                        // Move existing item to grocery
+                        await fetch(`/api/items/${{exactMatch.id}}/to-grocery`, {{ method: 'POST' }});
+                    }} else {{
+                        // Create new item in grocery
+                        await fetch('/api/items', {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify({{
+                                name: ingredientName,
+                                location: 'grocery_list'
+                            }})
+                        }});
+                    }}
+                    added++;
+                }} catch (err) {{
+                    console.error(`Failed to add ${{ingredientName}}:`, err);
+                }}
+            }}
+            
+            showToast(`Added ${{added}} items to grocery list`);
+            btn.textContent = '✓ Added to grocery';
+            
+            // Reload after a moment to show updated status
+            setTimeout(() => location.reload(), 1500);
+        }}
+        
+        function showToast(message) {{
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
         }}
     </script>
 </body>

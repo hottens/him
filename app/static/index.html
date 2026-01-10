@@ -575,6 +575,28 @@
             color: var(--accent-orange);
         }
 
+        .recipe-card .ingredient-status {
+            margin-top: 0.5rem;
+            padding: 0.5rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+        }
+
+        .recipe-card .ingredient-status.complete {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-green);
+        }
+
+        .recipe-card .ingredient-status.partial {
+            background: rgba(210, 153, 34, 0.15);
+            color: var(--accent-orange);
+        }
+
+        .recipe-card .ingredient-status.missing {
+            background: rgba(248, 81, 73, 0.15);
+            color: var(--accent-red);
+        }
+
         /* AI Suggestion Box */
         .ai-section {
             background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary));
@@ -668,6 +690,7 @@
         <button class="tab active" data-panel="scanner">📷 Scan</button>
         <button class="tab" data-panel="inventory">🏠 Inventory<span class="count" id="inventory-count">0</span></button>
         <button class="tab" data-panel="grocery">🛒 Grocery<span class="count" id="grocery-count">0</span></button>
+        <button class="tab" data-panel="favorites">⭐ Favorites<span class="count" id="favorites-count">0</span></button>
         <button class="tab" data-panel="recipes">📖 Recipes</button>
     </nav>
 
@@ -724,6 +747,20 @@
                     <button class="btn btn-success" onclick="quickAddToInventory()">Add</button>
                 </div>
             </div>
+            
+            <div class="ai-section">
+                <h3>✨ What Can I Cook?</h3>
+                <div class="form-group" style="margin-bottom: 0.75rem;">
+                    <input type="text" class="form-input" id="inventory-recipe-query" 
+                           placeholder="e.g., soup, pasta, quick meal...">
+                </div>
+                <button class="btn btn-purple btn-block" onclick="getRecipeSuggestionsFromInventory()" id="inventory-recipe-btn">
+                    Suggest Recipes
+                </button>
+                <div id="inventory-recipe-suggestions"></div>
+            </div>
+            
+            <div class="section-divider">Items in Stock</div>
             <div id="inventory-list" class="item-list"></div>
         </div>
 
@@ -746,6 +783,14 @@
             </div>
             
             <div id="grocery-list" class="item-list"></div>
+        </div>
+
+        <!-- Favorites Panel -->
+        <div id="favorites" class="panel">
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                Your favorite recipes with ingredient availability
+            </p>
+            <div id="favorites-list"></div>
         </div>
 
         <!-- Recipes Panel -->
@@ -862,12 +907,16 @@
             document.getElementById('recipe-query-input').addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') getRecipeSuggestions();
             });
+            document.getElementById('inventory-recipe-query').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') getRecipeSuggestionsFromInventory();
+            });
 
             // Load initial data
             loadInventory();
             loadGrocery();
             loadAllItems();
             loadRecipes();
+            loadFavorites();
         });
 
         // Panel Navigation
@@ -1338,6 +1387,139 @@
             }
         }
 
+        async function loadFavorites() {
+            try {
+                const [recipesRes, inventoryRes] = await Promise.all([
+                    fetch(`${API_BASE}/recipes?favorites_only=true`),
+                    fetch(`${API_BASE}/inventory`)
+                ]);
+                
+                const recipesData = await recipesRes.json();
+                const inventoryData = await inventoryRes.json();
+                
+                // Create a set of inventory item names (lowercase for matching)
+                const inventoryNames = new Set(
+                    inventoryData.items.map(item => item.name.toLowerCase())
+                );
+                
+                document.getElementById('favorites-count').textContent = recipesData.count;
+                
+                const listDiv = document.getElementById('favorites-list');
+                if (recipesData.recipes.length === 0) {
+                    listDiv.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">⭐</div>
+                            <p>No favorite recipes yet</p>
+                            <p style="font-size: 0.85rem; margin-top: 0.5rem;">
+                                Mark recipes as favorites to see them here
+                            </p>
+                        </div>
+                    `;
+                } else {
+                    listDiv.innerHTML = recipesData.recipes.map(recipe => {
+                        // Check ingredient availability
+                        const ingredients = recipe.ingredients || [];
+                        const totalIngredients = ingredients.length;
+                        const availableIngredients = ingredients.filter(ing => 
+                            inventoryNames.has(ing.name.toLowerCase())
+                        ).length;
+                        
+                        let statusClass, statusText;
+                        if (totalIngredients === 0) {
+                            statusClass = 'partial';
+                            statusText = 'No ingredients listed';
+                        } else if (availableIngredients === totalIngredients) {
+                            statusClass = 'complete';
+                            statusText = `✓ All ${totalIngredients} ingredients in stock`;
+                        } else if (availableIngredients === 0) {
+                            statusClass = 'missing';
+                            statusText = `✗ 0/${totalIngredients} ingredients in stock`;
+                        } else {
+                            statusClass = 'partial';
+                            statusText = `◐ ${availableIngredients}/${totalIngredients} ingredients in stock`;
+                        }
+                        
+                        return `
+                            <div class="recipe-card" onclick="window.location.href='/recipe/${recipe.id}'">
+                                <h3>
+                                    <span class="favorite-star">★</span>
+                                    ${recipe.name}
+                                </h3>
+                                <div class="recipe-meta">
+                                    ${recipe.servings} servings
+                                    ${recipe.prep_time_minutes ? ` • ${recipe.prep_time_minutes}min prep` : ''}
+                                    ${recipe.cook_time_minutes ? ` • ${recipe.cook_time_minutes}min cook` : ''}
+                                </div>
+                                <div class="ingredient-status ${statusClass}">
+                                    ${statusText}
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            } catch (err) {
+                console.error('Error loading favorites:', err);
+            }
+        }
+
+        async function getRecipeSuggestionsFromInventory() {
+            const btn = document.getElementById('inventory-recipe-btn');
+            const container = document.getElementById('inventory-recipe-suggestions');
+            const queryInput = document.getElementById('inventory-recipe-query');
+            const query = queryInput.value.trim();
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Thinking...';
+            container.innerHTML = '';
+
+            try {
+                const response = await fetch(`${API_BASE}/ai/recipe-suggestions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query || null })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail);
+                }
+
+                const data = await response.json();
+                
+                container.innerHTML = data.suggestions.map((recipe, index) => `
+                    <div class="suggestion-card">
+                        <h4>${recipe.name}</h4>
+                        <p>${recipe.description}</p>
+                        <p style="margin-top: 0.5rem; font-size: 0.8rem;">
+                            ${recipe.servings} servings
+                            ${recipe.prep_time_minutes ? ` • ${recipe.prep_time_minutes}min prep` : ''}
+                            ${recipe.cook_time_minutes ? ` • ${recipe.cook_time_minutes}min cook` : ''}
+                        </p>
+                        <button class="btn btn-purple" style="margin-top: 0.75rem;" 
+                                onclick="event.stopPropagation(); saveRecipeSuggestionFromInventory(${index})">
+                            Save Recipe
+                        </button>
+                    </div>
+                `).join('');
+                
+                // Store suggestions for saving
+                window.inventoryRecipeSuggestions = data.suggestions;
+                
+            } catch (err) {
+                container.innerHTML = `<p style="color: var(--accent-red);">${err.message}</p>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Suggest Recipes';
+            }
+        }
+
+        async function saveRecipeSuggestionFromInventory(index) {
+            const recipe = window.inventoryRecipeSuggestions[index];
+            pendingRecipeToSave = recipe;
+            document.getElementById('save-recipe-name').textContent = recipe.name;
+            document.getElementById('save-recipe-modal').classList.add('active');
+        }
+
         async function getRecipeSuggestions() {
             const btn = document.getElementById('recipe-suggest-btn');
             const container = document.getElementById('recipe-suggestions');
@@ -1418,6 +1600,7 @@
                 showToast(`Saved: ${pendingRecipeToSave.name}`, 'success');
                 closeSaveRecipeModal();
                 loadRecipes();
+                loadFavorites();
             } catch (err) {
                 showToast(err.message, 'error');
             }
