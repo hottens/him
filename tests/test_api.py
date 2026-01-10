@@ -15,7 +15,9 @@ class TestHealthCheck:
         response = client.get("/api/health")
         
         assert response.status_code == 200
-        assert response.json() == {"status": "healthy"}
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert "gemini_configured" in data
 
 
 class TestBarcodeLookup:
@@ -594,4 +596,188 @@ class TestEdgeCases:
             json={"name": "Item 2", "barcode": "SAME_CODE"}
         )
         assert response2.status_code == 400
+
+
+class TestRecipeCRUD:
+    """Tests for Recipe Create, Read, Update, Delete operations."""
+
+    def test_create_recipe(self, client):
+        """Test creating a recipe with ingredients and steps."""
+        recipe_data = {
+            "name": "Test Recipe",
+            "description": "A test recipe",
+            "servings": 2,
+            "prep_time_minutes": 5,
+            "cook_time_minutes": 10,
+            "ingredients": [
+                {"name": "Ingredient 1", "amount": "1", "unit": "cup"},
+                {"name": "Ingredient 2", "amount": "2", "unit": "tbsp"}
+            ],
+            "steps": [
+                {"step_number": 1, "instruction": "Do step 1"},
+                {"step_number": 2, "instruction": "Do step 2"}
+            ]
+        }
+        
+        response = client.post("/api/recipes", json=recipe_data)
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "Test Recipe"
+        assert data["servings"] == 2
+        assert len(data["ingredients"]) == 2
+        assert len(data["steps"]) == 2
+
+    def test_create_recipe_minimal(self, client):
+        """Test creating a recipe with minimal data."""
+        response = client.post(
+            "/api/recipes",
+            json={"name": "Minimal Recipe"}
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "Minimal Recipe"
+        assert data["servings"] == 4  # default
+        assert data["ingredients"] == []
+        assert data["steps"] == []
+
+    def test_list_recipes(self, client, sample_recipe):
+        """Test listing all recipes."""
+        response = client.get("/api/recipes")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 1
+        assert len(data["recipes"]) == 1
+        assert data["recipes"][0]["name"] == "Simple Pasta"
+
+    def test_list_recipes_favorites_only(self, client):
+        """Test filtering recipes by favorites."""
+        # Create non-favorite
+        client.post("/api/recipes", json={"name": "Normal Recipe"})
+        # Create favorite
+        client.post("/api/recipes", json={"name": "Favorite Recipe", "is_favorite": True})
+        
+        response = client.get("/api/recipes?favorites_only=true")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 1
+        assert data["recipes"][0]["name"] == "Favorite Recipe"
+
+    def test_get_recipe(self, client, sample_recipe):
+        """Test getting a single recipe."""
+        response = client.get(f"/api/recipes/{sample_recipe['id']}")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "Simple Pasta"
+        assert len(data["ingredients"]) == 3
+        assert len(data["steps"]) == 3
+
+    def test_get_recipe_not_found(self, client):
+        """Test getting a non-existent recipe."""
+        response = client.get("/api/recipes/99999")
+        
+        assert response.status_code == 404
+
+    def test_update_recipe(self, client, sample_recipe):
+        """Test updating a recipe."""
+        response = client.patch(
+            f"/api/recipes/{sample_recipe['id']}",
+            json={"name": "Updated Pasta", "servings": 6}
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "Updated Pasta"
+        assert data["servings"] == 6
+
+    def test_delete_recipe(self, client, sample_recipe):
+        """Test deleting a recipe."""
+        response = client.delete(f"/api/recipes/{sample_recipe['id']}")
+        
+        assert response.status_code == 200
+        assert response.json()["deleted"] is True
+        
+        # Verify deleted
+        response = client.get(f"/api/recipes/{sample_recipe['id']}")
+        assert response.status_code == 404
+
+    def test_toggle_favorite(self, client, sample_recipe):
+        """Test toggling recipe favorite status."""
+        # Initially not favorite
+        assert sample_recipe["is_favorite"] is False
+        
+        # Toggle to favorite
+        response = client.post(f"/api/recipes/{sample_recipe['id']}/favorite")
+        assert response.status_code == 200
+        assert response.json()["is_favorite"] is True
+        
+        # Toggle back
+        response = client.post(f"/api/recipes/{sample_recipe['id']}/favorite")
+        assert response.json()["is_favorite"] is False
+
+
+class TestRecipeView:
+    """Tests for the recipe view page."""
+
+    def test_view_recipe_page(self, client, sample_recipe):
+        """Test that the recipe view page returns HTML."""
+        response = client.get(f"/recipe/{sample_recipe['id']}")
+        
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "Simple Pasta" in response.text
+
+    def test_view_recipe_page_not_found(self, client):
+        """Test viewing a non-existent recipe."""
+        response = client.get("/recipe/99999")
+        
+        assert response.status_code == 404
+
+
+class TestHealthCheckExtended:
+    """Extended health check tests."""
+
+    def test_health_check_includes_gemini_status(self, client):
+        """Test that health check includes Gemini configuration status."""
+        response = client.get("/api/health")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "gemini_configured" in data
+        # Will be False in test environment without API key
+        assert data["gemini_configured"] is False
+
+
+class TestAIEndpoints:
+    """Tests for AI endpoints (without actual API calls)."""
+
+    def test_recipe_suggestions_no_api_key(self, client, sample_items):
+        """Test recipe suggestions when Gemini API key is not set."""
+        response = client.post("/api/ai/recipe-suggestions", json={})
+        
+        # Should return 503 when API key not configured
+        assert response.status_code == 503
+        assert "not configured" in response.json()["detail"].lower()
+
+    def test_recipe_suggestions_with_query_no_api_key(self, client, sample_items):
+        """Test recipe suggestions with query when Gemini API key is not set."""
+        response = client.post(
+            "/api/ai/recipe-suggestions",
+            json={"query": "soup recipes"}
+        )
+        
+        # Should return 503 when API key not configured
+        assert response.status_code == 503
+
+    def test_grocery_suggestions_no_api_key(self, client, sample_items):
+        """Test grocery suggestions when Gemini API key is not set."""
+        response = client.post("/api/ai/grocery-suggestions")
+        
+        # Should return 503 when API key not configured
+        assert response.status_code == 503
+        assert "not configured" in response.json()["detail"].lower()
 

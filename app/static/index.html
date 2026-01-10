@@ -19,6 +19,7 @@
             --accent-green: #3fb950;
             --accent-orange: #d29922;
             --accent-red: #f85149;
+            --accent-purple: #a371f7;
             --border-color: #30363d;
             --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
             --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -70,11 +71,11 @@
 
         .tab {
             flex: 1;
-            padding: 0.875rem 1rem;
+            padding: 0.75rem 0.5rem;
             background: none;
             border: none;
             color: var(--text-secondary);
-            font-size: 0.875rem;
+            font-size: 0.8rem;
             font-weight: 500;
             cursor: pointer;
             border-bottom: 2px solid transparent;
@@ -96,8 +97,8 @@
             background: var(--bg-tertiary);
             padding: 0.125rem 0.5rem;
             border-radius: 10px;
-            font-size: 0.75rem;
-            margin-left: 0.5rem;
+            font-size: 0.7rem;
+            margin-left: 0.25rem;
         }
 
         .tab.active .count {
@@ -172,6 +173,7 @@
             transition: all 0.15s;
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 0.5rem;
         }
 
@@ -182,6 +184,11 @@
 
         .btn:active {
             transform: scale(0.98);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         .btn-primary {
@@ -217,9 +224,24 @@
             border-color: #bf8a1f;
         }
 
+        .btn-purple {
+            background: var(--accent-purple);
+            border-color: var(--accent-purple);
+            color: #fff;
+        }
+
+        .btn-purple:hover {
+            background: #8b5cf6;
+            border-color: #8b5cf6;
+        }
+
         .btn-block {
             width: 100%;
-            justify-content: center;
+        }
+
+        .btn-sm {
+            padding: 0.5rem;
+            font-size: 1rem;
         }
 
         /* Item List */
@@ -266,11 +288,6 @@
             display: flex;
             gap: 0.5rem;
             flex-shrink: 0;
-        }
-
-        .item-actions .btn {
-            padding: 0.5rem;
-            font-size: 1rem;
         }
 
         /* Empty State */
@@ -346,14 +363,6 @@
             padding: 1rem;
         }
 
-        .modal-footer {
-            padding: 1rem;
-            border-top: 1px solid var(--border-color);
-            display: flex;
-            gap: 0.5rem;
-            justify-content: flex-end;
-        }
-
         /* Forms */
         .form-group {
             margin-bottom: 1rem;
@@ -367,7 +376,7 @@
             color: var(--text-secondary);
         }
 
-        .form-input {
+        .form-input, .form-select {
             width: 100%;
             padding: 0.625rem 0.875rem;
             background: var(--bg-tertiary);
@@ -377,7 +386,7 @@
             font-size: 1rem;
         }
 
-        .form-input:focus {
+        .form-input:focus, .form-select:focus {
             outline: none;
             border-color: var(--accent-blue);
         }
@@ -395,16 +404,40 @@
 
         .location-buttons .btn {
             flex: 1;
-            justify-content: center;
         }
 
-        /* Item Search Results */
+        /* Manual Add Section */
+        .manual-add-section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .manual-add-section h3 {
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .manual-add-row {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .manual-add-row .form-input {
+            flex: 1;
+        }
+
+        /* Search Results */
         .search-results {
             max-height: 200px;
             overflow-y: auto;
             margin-top: 0.5rem;
             border: 1px solid var(--border-color);
             border-radius: 8px;
+            background: var(--bg-tertiary);
         }
 
         .search-result-item {
@@ -419,7 +452,7 @@
         }
 
         .search-result-item:hover {
-            background: var(--bg-tertiary);
+            background: var(--bg-secondary);
         }
 
         .search-result-item.selected {
@@ -507,17 +540,121 @@
 
         .mode-buttons .btn {
             flex: 1;
-            justify-content: center;
         }
 
         .mode-buttons .btn.active {
             box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px currentColor;
         }
 
+        /* Recipe Card */
+        .recipe-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .recipe-card:hover {
+            border-color: var(--accent-purple);
+        }
+
+        .recipe-card h3 {
+            font-size: 1rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .recipe-card .recipe-meta {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .recipe-card .favorite-star {
+            color: var(--accent-orange);
+        }
+
+        /* AI Suggestion Box */
+        .ai-section {
+            background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary));
+            border: 1px solid var(--accent-purple);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .ai-section h3 {
+            color: var(--accent-purple);
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .suggestion-card {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .suggestion-card h4 {
+            font-size: 0.95rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .suggestion-card p {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        /* Loading spinner */
+        .loading {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid var(--text-secondary);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Section Divider */
+        .section-divider {
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            margin: 1.5rem 0 1rem;
+            position: relative;
+        }
+
+        .section-divider::before,
+        .section-divider::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            width: 30%;
+            height: 1px;
+            background: var(--border-color);
+        }
+
+        .section-divider::before { left: 0; }
+        .section-divider::after { right: 0; }
+
         /* Responsive adjustments */
         @media (max-width: 400px) {
             .item-actions {
                 flex-direction: column;
+            }
+            .tab {
+                font-size: 0.75rem;
+                padding: 0.75rem 0.25rem;
             }
         }
     </style>
@@ -528,15 +665,10 @@
     </header>
 
     <nav class="tabs">
-        <button class="tab active" data-panel="scanner">
-            📷 Scanner
-        </button>
-        <button class="tab" data-panel="inventory">
-            🏠 Inventory<span class="count" id="inventory-count">0</span>
-        </button>
-        <button class="tab" data-panel="grocery">
-            🛒 Grocery<span class="count" id="grocery-count">0</span>
-        </button>
+        <button class="tab active" data-panel="scanner">📷 Scan</button>
+        <button class="tab" data-panel="inventory">🏠 Inventory<span class="count" id="inventory-count">0</span></button>
+        <button class="tab" data-panel="grocery">🛒 Grocery<span class="count" id="grocery-count">0</span></button>
+        <button class="tab" data-panel="recipes">📖 Recipes</button>
     </nav>
 
     <main>
@@ -544,15 +676,15 @@
         <div id="scanner" class="panel active">
             <div class="mode-buttons">
                 <button class="btn btn-success active" id="mode-inventory" onclick="setScanMode('inventory')">
-                    🏠 Add to Inventory
+                    🏠 Inventory
                 </button>
                 <button class="btn btn-warning" id="mode-grocery" onclick="setScanMode('grocery_list')">
-                    🛒 Add to Grocery
+                    🛒 Grocery
                 </button>
             </div>
 
             <div class="scan-mode">
-                <span class="scan-mode-label">Scan mode:</span>
+                <span class="scan-mode-label">Adding to:</span>
                 <span class="scan-mode-value inventory" id="current-mode">Inventory</span>
             </div>
 
@@ -565,16 +697,77 @@
                 </div>
                 <div id="scanner-result" class="scanner-result" style="display: none;"></div>
             </div>
+
+            <div class="section-divider">or add manually</div>
+
+            <div class="manual-add-section">
+                <h3>➕ Quick Add</h3>
+                <div class="form-group">
+                    <input type="text" class="form-input" id="manual-item-input" 
+                           placeholder="Type item name..." list="items-datalist">
+                    <datalist id="items-datalist"></datalist>
+                </div>
+                <div class="location-buttons">
+                    <button class="btn btn-success" onclick="manualAddItem('inventory')">🏠 Inventory</button>
+                    <button class="btn btn-warning" onclick="manualAddItem('grocery_list')">🛒 Grocery</button>
+                    <button class="btn" onclick="manualAddItem('neither')">📦 Archive</button>
+                </div>
+            </div>
         </div>
 
         <!-- Inventory Panel -->
         <div id="inventory" class="panel">
+            <div class="manual-add-section">
+                <div class="manual-add-row">
+                    <input type="text" class="form-input" id="inventory-add-input" 
+                           placeholder="Add item to inventory..." list="items-datalist">
+                    <button class="btn btn-success" onclick="quickAddToInventory()">Add</button>
+                </div>
+            </div>
             <div id="inventory-list" class="item-list"></div>
         </div>
 
         <!-- Grocery Panel -->
         <div id="grocery" class="panel">
+            <div class="manual-add-section">
+                <div class="manual-add-row">
+                    <input type="text" class="form-input" id="grocery-add-input" 
+                           placeholder="Add item to grocery list..." list="items-datalist">
+                    <button class="btn btn-warning" onclick="quickAddToGrocery()">Add</button>
+                </div>
+            </div>
+            
+            <div class="ai-section" id="grocery-ai-section">
+                <h3>✨ AI Suggestions</h3>
+                <button class="btn btn-purple btn-block" onclick="getGrocerySuggestions()" id="grocery-suggest-btn">
+                    Get Smart Suggestions
+                </button>
+                <div id="grocery-suggestions"></div>
+            </div>
+            
             <div id="grocery-list" class="item-list"></div>
+        </div>
+
+        <!-- Recipes Panel -->
+        <div id="recipes" class="panel">
+            <div class="ai-section">
+                <h3>✨ AI Recipe Ideas</h3>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                    Get recipe suggestions based on your current inventory
+                </p>
+                <div class="form-group" style="margin-bottom: 0.75rem;">
+                    <input type="text" class="form-input" id="recipe-query-input" 
+                           placeholder="e.g., soup, quick dinner, Italian, vegetarian...">
+                </div>
+                <button class="btn btn-purple btn-block" onclick="getRecipeSuggestions()" id="recipe-suggest-btn">
+                    Suggest Recipes
+                </button>
+                <div id="recipe-suggestions"></div>
+            </div>
+
+            <div class="section-divider">Saved Recipes</div>
+            
+            <div id="recipe-list"></div>
         </div>
     </main>
 
@@ -599,12 +792,26 @@
                 </div>
 
                 <div class="location-buttons">
-                    <button class="btn btn-success" onclick="createItem('inventory')">
-                        🏠 Inventory
-                    </button>
-                    <button class="btn btn-warning" onclick="createItem('grocery_list')">
-                        🛒 Grocery
-                    </button>
+                    <button class="btn btn-success" onclick="createItem('inventory')">🏠 Inventory</button>
+                    <button class="btn btn-warning" onclick="createItem('grocery_list')">🛒 Grocery</button>
+                    <button class="btn" onclick="createItem('neither')">📦 Archive</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Recipe Modal -->
+    <div class="modal-overlay" id="save-recipe-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Save Recipe</h2>
+                <button class="modal-close" onclick="closeSaveRecipeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 1rem;">Save "<span id="save-recipe-name"></span>" to your recipes?</p>
+                <div class="location-buttons">
+                    <button class="btn" onclick="closeSaveRecipeModal()">Cancel</button>
+                    <button class="btn btn-purple" onclick="confirmSaveRecipe()">Save Recipe</button>
                 </div>
             </div>
         </div>
@@ -620,6 +827,8 @@
         let currentScanMode = 'inventory'; // 'inventory' or 'grocery_list'
         let pendingBarcode = null;
         let selectedExistingItem = null;
+        let allItems = [];
+        let pendingRecipeToSave = null;
 
         // API base URL
         const API_BASE = '/api';
@@ -631,7 +840,7 @@
                 tab.addEventListener('click', () => switchPanel(tab.dataset.panel));
             });
 
-            // Set up item name search
+            // Set up item name search in modal
             const itemNameInput = document.getElementById('modal-item-name');
             let searchTimeout;
             itemNameInput.addEventListener('input', () => {
@@ -640,9 +849,25 @@
                 searchTimeout = setTimeout(() => searchItems(itemNameInput.value), 300);
             });
 
+            // Handle Enter key for manual inputs
+            document.getElementById('manual-item-input').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') manualAddItem(currentScanMode);
+            });
+            document.getElementById('inventory-add-input').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') quickAddToInventory();
+            });
+            document.getElementById('grocery-add-input').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') quickAddToGrocery();
+            });
+            document.getElementById('recipe-query-input').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') getRecipeSuggestions();
+            });
+
             // Load initial data
             loadInventory();
             loadGrocery();
+            loadAllItems();
+            loadRecipes();
         });
 
         // Panel Navigation
@@ -708,10 +933,9 @@
                 isScanning = true;
                 btn.textContent = '⏹ Stop Scanner';
                 btn.classList.remove('btn-primary');
-                btn.classList.add('btn');
             } catch (err) {
                 console.error('Failed to start scanner:', err);
-                showToast('Failed to start camera. Please ensure camera permissions are granted.', 'error');
+                showToast('Camera access failed. Try HTTPS or check permissions.', 'error');
             }
         }
 
@@ -732,18 +956,11 @@
         }
 
         function onScanSuccess(decodedText, decodedResult) {
-            // Provide haptic feedback if available
-            if (navigator.vibrate) {
-                navigator.vibrate(100);
-            }
-
-            // Look up the barcode
+            if (navigator.vibrate) navigator.vibrate(100);
             lookupBarcode(decodedText);
         }
 
-        function onScanFailure(error) {
-            // Ignore scan failures (no barcode detected)
-        }
+        function onScanFailure(error) {}
 
         // Barcode Lookup
         async function lookupBarcode(code) {
@@ -757,7 +974,6 @@
                 const data = await response.json();
 
                 if (data.found) {
-                    // Known barcode - move item to current mode location
                     resultDiv.innerHTML = `✓ Found: <strong>${data.item.name}</strong>`;
                     resultDiv.className = 'scanner-result success';
                     
@@ -767,14 +983,11 @@
                     loadInventory();
                     loadGrocery();
                 } else {
-                    // Unknown barcode - show modal
                     resultDiv.innerHTML = `⚠ New barcode: <strong>${code}</strong>`;
                     resultDiv.className = 'scanner-result new';
-                    
                     showNewItemModal(code);
                 }
             } catch (err) {
-                console.error('Error looking up barcode:', err);
                 resultDiv.textContent = `Error: ${err.message}`;
                 showToast('Failed to look up barcode', 'error');
             }
@@ -818,9 +1031,9 @@
                     <div class="search-result-item" onclick="selectExistingItem(${item.id}, '${item.name.replace(/'/g, "\\'")}')">
                         ${item.name}
                         <small style="color: var(--text-secondary); display: block;">
-                            ${item.location === 'inventory' ? '🏠 In inventory' : 
-                              item.location === 'grocery_list' ? '🛒 On grocery list' : 
-                              'Not tracked'}
+                            ${item.location === 'inventory' ? '🏠 Inventory' : 
+                              item.location === 'grocery_list' ? '🛒 Grocery' : 
+                              '📦 Archive'}
                         </small>
                     </div>
                 `).join('');
@@ -834,11 +1047,6 @@
             selectedExistingItem = { id, name };
             document.getElementById('modal-item-name').value = name;
             document.getElementById('search-results').style.display = 'none';
-            
-            // Highlight selection
-            document.querySelectorAll('.search-result-item').forEach(el => {
-                el.classList.remove('selected');
-            });
         }
 
         async function createItem(location) {
@@ -851,7 +1059,6 @@
 
             try {
                 if (selectedExistingItem) {
-                    // Associate barcode with existing item
                     await fetch(`${API_BASE}/barcode/associate`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -861,11 +1068,9 @@
                         })
                     });
                     
-                    // Move to selected location
                     await moveItem(selectedExistingItem.id, location);
                     showToast(`Added barcode to ${selectedExistingItem.name}`, 'success');
                 } else {
-                    // Create new item
                     const response = await fetch(`${API_BASE}/items`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -887,46 +1092,148 @@
                 closeModal();
                 loadInventory();
                 loadGrocery();
+                loadAllItems();
             } catch (err) {
-                console.error('Error creating item:', err);
                 showToast(err.message, 'error');
             }
         }
 
-        // Item Management
-        async function moveItem(itemId, location) {
-            const endpoint = location === 'inventory' ? 'to-inventory' : 'to-grocery';
+        // Manual Add Functions
+        async function manualAddItem(location) {
+            const input = document.getElementById('manual-item-input');
+            const itemName = input.value.trim();
             
+            if (!itemName) return;
+
             try {
-                const response = await fetch(`${API_BASE}/items/${itemId}/${endpoint}`, {
-                    method: 'POST'
-                });
+                // Check if item exists
+                const existing = allItems.find(i => i.name.toLowerCase() === itemName.toLowerCase());
                 
-                if (!response.ok) {
-                    throw new Error('Failed to move item');
+                if (existing) {
+                    await moveItem(existing.id, location);
+                    showToast(`${existing.name} → ${getLocationLabel(location)}`, 'success');
+                } else {
+                    const response = await fetch(`${API_BASE}/items`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: itemName, location: location })
+                    });
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.detail);
+                    }
+
+                    showToast(`Created: ${itemName}`, 'success');
                 }
 
+                input.value = '';
                 loadInventory();
                 loadGrocery();
+                loadAllItems();
             } catch (err) {
-                console.error('Error moving item:', err);
-                showToast('Failed to move item', 'error');
+                showToast(err.message, 'error');
             }
+        }
+
+        async function quickAddToInventory() {
+            const input = document.getElementById('inventory-add-input');
+            const itemName = input.value.trim();
+            if (!itemName) return;
+
+            const existing = allItems.find(i => i.name.toLowerCase() === itemName.toLowerCase());
+            
+            try {
+                if (existing) {
+                    await moveItem(existing.id, 'inventory');
+                } else {
+                    await fetch(`${API_BASE}/items`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: itemName, location: 'inventory' })
+                    });
+                }
+                
+                input.value = '';
+                showToast(`${itemName} added to inventory`, 'success');
+                loadInventory();
+                loadGrocery();
+                loadAllItems();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function quickAddToGrocery() {
+            const input = document.getElementById('grocery-add-input');
+            const itemName = input.value.trim();
+            if (!itemName) return;
+
+            const existing = allItems.find(i => i.name.toLowerCase() === itemName.toLowerCase());
+            
+            try {
+                if (existing) {
+                    await moveItem(existing.id, 'grocery_list');
+                } else {
+                    await fetch(`${API_BASE}/items`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: itemName, location: 'grocery_list' })
+                    });
+                }
+                
+                input.value = '';
+                showToast(`${itemName} added to grocery list`, 'success');
+                loadInventory();
+                loadGrocery();
+                loadAllItems();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        function getLocationLabel(location) {
+            const labels = {
+                'inventory': '🏠 Inventory',
+                'grocery_list': '🛒 Grocery',
+                'neither': '📦 Archive'
+            };
+            return labels[location] || location;
+        }
+
+        // Item Management
+        async function moveItem(itemId, location) {
+            const endpoint = location === 'inventory' ? 'to-inventory' : 
+                            location === 'grocery_list' ? 'to-grocery' : 'remove';
+            
+            await fetch(`${API_BASE}/items/${itemId}/${endpoint}`, { method: 'POST' });
+            loadInventory();
+            loadGrocery();
         }
 
         async function removeItem(itemId) {
-            try {
-                await fetch(`${API_BASE}/items/${itemId}/remove`, { method: 'POST' });
-                showToast('Item removed from lists', 'success');
-                loadInventory();
-                loadGrocery();
-            } catch (err) {
-                console.error('Error removing item:', err);
-                showToast('Failed to remove item', 'error');
-            }
+            await fetch(`${API_BASE}/items/${itemId}/remove`, { method: 'POST' });
+            showToast('Item archived', 'success');
+            loadInventory();
+            loadGrocery();
         }
 
         // Load Lists
+        async function loadAllItems() {
+            try {
+                const response = await fetch(`${API_BASE}/items`);
+                allItems = await response.json();
+                
+                // Update datalist
+                const datalist = document.getElementById('items-datalist');
+                datalist.innerHTML = allItems.map(item => 
+                    `<option value="${item.name}">`
+                ).join('');
+            } catch (err) {
+                console.error('Error loading items:', err);
+            }
+        }
+
         async function loadInventory() {
             try {
                 const response = await fetch(`${API_BASE}/inventory`);
@@ -940,9 +1247,6 @@
                         <div class="empty-state">
                             <div class="empty-state-icon">🏠</div>
                             <p>No items in inventory</p>
-                            <p style="font-size: 0.875rem; margin-top: 0.5rem;">
-                                Scan a barcode to add items
-                            </p>
                         </div>
                     `;
                 } else {
@@ -966,9 +1270,6 @@
                         <div class="empty-state">
                             <div class="empty-state-icon">🛒</div>
                             <p>Grocery list is empty</p>
-                            <p style="font-size: 0.875rem; margin-top: 0.5rem;">
-                                Items you need to restock will appear here
-                            </p>
                         </div>
                     `;
                 } else {
@@ -990,20 +1291,203 @@
                     </div>
                     <div class="item-actions">
                         ${currentList === 'inventory' ? `
-                            <button class="btn btn-warning" onclick="moveItem(${item.id}, 'grocery_list')" title="Move to Grocery List">
-                                🛒
-                            </button>
+                            <button class="btn btn-warning btn-sm" onclick="moveItem(${item.id}, 'grocery_list')" title="To Grocery">🛒</button>
                         ` : `
-                            <button class="btn btn-success" onclick="moveItem(${item.id}, 'inventory')" title="Move to Inventory">
-                                🏠
-                            </button>
+                            <button class="btn btn-success btn-sm" onclick="moveItem(${item.id}, 'inventory')" title="To Inventory">🏠</button>
                         `}
-                        <button class="btn" onclick="removeItem(${item.id})" title="Remove from lists">
-                            ✕
-                        </button>
+                        <button class="btn btn-sm" onclick="removeItem(${item.id})" title="Archive">📦</button>
                     </div>
                 </div>
             `;
+        }
+
+        // Recipe Functions
+        async function loadRecipes() {
+            try {
+                const response = await fetch(`${API_BASE}/recipes`);
+                const data = await response.json();
+                
+                const listDiv = document.getElementById('recipe-list');
+                if (data.recipes.length === 0) {
+                    listDiv.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📖</div>
+                            <p>No saved recipes yet</p>
+                            <p style="font-size: 0.85rem; margin-top: 0.5rem;">
+                                Use AI suggestions above to discover recipes!
+                            </p>
+                        </div>
+                    `;
+                } else {
+                    listDiv.innerHTML = data.recipes.map(recipe => `
+                        <div class="recipe-card" onclick="window.location.href='/recipe/${recipe.id}'">
+                            <h3>
+                                ${recipe.is_favorite ? '<span class="favorite-star">★</span> ' : ''}
+                                ${recipe.name}
+                            </h3>
+                            <div class="recipe-meta">
+                                ${recipe.servings} servings
+                                ${recipe.prep_time_minutes ? ` • ${recipe.prep_time_minutes}min prep` : ''}
+                                ${recipe.cook_time_minutes ? ` • ${recipe.cook_time_minutes}min cook` : ''}
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Error loading recipes:', err);
+            }
+        }
+
+        async function getRecipeSuggestions() {
+            const btn = document.getElementById('recipe-suggest-btn');
+            const container = document.getElementById('recipe-suggestions');
+            const queryInput = document.getElementById('recipe-query-input');
+            const query = queryInput.value.trim();
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Thinking...';
+            container.innerHTML = '';
+
+            try {
+                const response = await fetch(`${API_BASE}/ai/recipe-suggestions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query || null })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail);
+                }
+
+                const data = await response.json();
+                
+                container.innerHTML = data.suggestions.map((recipe, index) => `
+                    <div class="suggestion-card">
+                        <h4>${recipe.name}</h4>
+                        <p>${recipe.description}</p>
+                        <p style="margin-top: 0.5rem; font-size: 0.8rem;">
+                            ${recipe.servings} servings
+                            ${recipe.prep_time_minutes ? ` • ${recipe.prep_time_minutes}min prep` : ''}
+                            ${recipe.cook_time_minutes ? ` • ${recipe.cook_time_minutes}min cook` : ''}
+                        </p>
+                        <button class="btn btn-purple" style="margin-top: 0.75rem;" 
+                                onclick="saveRecipeSuggestion(${index})">
+                            Save Recipe
+                        </button>
+                    </div>
+                `).join('');
+                
+                // Store suggestions for saving
+                window.recipeSuggestions = data.suggestions;
+                
+            } catch (err) {
+                container.innerHTML = `<p style="color: var(--accent-red);">${err.message}</p>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Suggest Recipes';
+            }
+        }
+
+        function saveRecipeSuggestion(index) {
+            const recipe = window.recipeSuggestions[index];
+            pendingRecipeToSave = recipe;
+            document.getElementById('save-recipe-name').textContent = recipe.name;
+            document.getElementById('save-recipe-modal').classList.add('active');
+        }
+
+        function closeSaveRecipeModal() {
+            document.getElementById('save-recipe-modal').classList.remove('active');
+            pendingRecipeToSave = null;
+        }
+
+        async function confirmSaveRecipe() {
+            if (!pendingRecipeToSave) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/recipes`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(pendingRecipeToSave)
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to save recipe');
+                }
+
+                showToast(`Saved: ${pendingRecipeToSave.name}`, 'success');
+                closeSaveRecipeModal();
+                loadRecipes();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function getGrocerySuggestions() {
+            const btn = document.getElementById('grocery-suggest-btn');
+            const container = document.getElementById('grocery-suggestions');
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Analyzing...';
+            container.innerHTML = '';
+
+            try {
+                const response = await fetch(`${API_BASE}/ai/grocery-suggestions`, { method: 'POST' });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail);
+                }
+
+                const data = await response.json();
+                
+                if (data.suggestions.length === 0) {
+                    container.innerHTML = '<p style="color: var(--text-secondary); margin-top: 1rem;">No suggestions at this time.</p>';
+                } else {
+                    container.innerHTML = `
+                        <div style="margin-top: 1rem;">
+                            ${data.suggestions.map(s => `
+                                <div class="suggestion-card" style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <strong>${s.item_name}</strong>
+                                        <p>${s.reason}</p>
+                                    </div>
+                                    <button class="btn btn-warning btn-sm" onclick="addSuggestionToGrocery('${s.item_name.replace(/'/g, "\\'")}')">
+                                        + Add
+                                    </button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+            } catch (err) {
+                container.innerHTML = `<p style="color: var(--accent-red); margin-top: 1rem;">${err.message}</p>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Get Smart Suggestions';
+            }
+        }
+
+        async function addSuggestionToGrocery(itemName) {
+            const existing = allItems.find(i => i.name.toLowerCase() === itemName.toLowerCase());
+            
+            try {
+                if (existing) {
+                    await moveItem(existing.id, 'grocery_list');
+                } else {
+                    await fetch(`${API_BASE}/items`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: itemName, location: 'grocery_list' })
+                    });
+                }
+                
+                showToast(`${itemName} added to grocery list`, 'success');
+                loadGrocery();
+                loadAllItems();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
         }
 
         // Toast Notifications
@@ -1014,11 +1498,8 @@
             toast.textContent = message;
             container.appendChild(toast);
 
-            setTimeout(() => {
-                toast.remove();
-            }, 3000);
+            setTimeout(() => toast.remove(), 3000);
         }
     </script>
 </body>
 </html>
-

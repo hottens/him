@@ -7,19 +7,18 @@ services:
     container_name: home-inventory
     restart: unless-stopped
     ports:
-      # Access at http://<your-local-ip>:4269
+      # Access at https://<your-local-ip>:4269
       - "4269:4269"
     volumes:
       # Persist database across container restarts
       - inventory_data:/data
+      # SSL certificates for HTTPS (required for camera access on phones)
+      - ./certs:/certs:ro
     environment:
       - DATABASE_PATH=/data/inventory.db
-    # For development: mount source for hot reload
-    # volumes:
-    #   - ./app:/app/app
-    # command: uvicorn app.main:app --host 0.0.0.0 --port 4269 --reload
+      # Set your Gemini API key for AI features (optional)
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
 
 volumes:
   inventory_data:
     name: home_inventory_data
-

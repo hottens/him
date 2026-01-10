@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
 from .models import ItemLocation
 
 
@@ -85,3 +86,112 @@ class GroceryListResponse(BaseModel):
     count: int
     items: list[ItemResponse]
 
+
+# --- Recipe Schemas ---
+
+class RecipeIngredientBase(BaseModel):
+    name: str
+    amount: Optional[str] = None
+    unit: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class RecipeIngredientCreate(RecipeIngredientBase):
+    pass
+
+
+class RecipeIngredientResponse(RecipeIngredientBase):
+    id: int
+    recipe_id: int
+
+    class Config:
+        from_attributes = True
+
+
+class RecipeStepBase(BaseModel):
+    step_number: int
+    instruction: str
+
+
+class RecipeStepCreate(RecipeStepBase):
+    pass
+
+
+class RecipeStepResponse(RecipeStepBase):
+    id: int
+    recipe_id: int
+
+    class Config:
+        from_attributes = True
+
+
+class RecipeBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    servings: int = 4
+    prep_time_minutes: Optional[int] = None
+    cook_time_minutes: Optional[int] = None
+
+
+class RecipeCreate(RecipeBase):
+    ingredients: list[RecipeIngredientCreate] = []
+    steps: list[RecipeStepCreate] = []
+    is_favorite: bool = False
+
+
+class RecipeResponse(RecipeBase):
+    id: int
+    is_favorite: bool
+    created_at: datetime
+    ingredients: list[RecipeIngredientResponse] = []
+    steps: list[RecipeStepResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class RecipeUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    servings: Optional[int] = None
+    prep_time_minutes: Optional[int] = None
+    cook_time_minutes: Optional[int] = None
+    is_favorite: Optional[bool] = None
+
+
+class RecipeListResponse(BaseModel):
+    """List of recipes."""
+    count: int
+    recipes: list[RecipeResponse]
+
+
+# --- Gemini Suggestion Schemas ---
+
+class GeminiRecipeSuggestion(BaseModel):
+    """A single recipe suggestion from Gemini."""
+    name: str
+    description: str
+    servings: int = 4
+    prep_time_minutes: Optional[int] = None
+    cook_time_minutes: Optional[int] = None
+    ingredients: list[RecipeIngredientCreate]
+    steps: list[RecipeStepCreate]
+
+
+class GeminiRecipeSuggestionsResponse(BaseModel):
+    """Response containing recipe suggestions from Gemini."""
+    suggestions: list[GeminiRecipeSuggestion]
+    inventory_used: list[str]  # Items from inventory that were considered
+
+
+class GeminiGrocerySuggestion(BaseModel):
+    """A single grocery suggestion."""
+    item_name: str
+    reason: str  # Why this is suggested (e.g., "needed for Pasta Carbonara")
+
+
+class GeminiGrocerySuggestionsResponse(BaseModel):
+    """Response containing grocery suggestions from Gemini."""
+    suggestions: list[GeminiGrocerySuggestion]
+    based_on_recipes: list[str]  # Recipe names considered
+    current_inventory: list[str]  # What's already in inventory

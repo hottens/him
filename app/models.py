@@ -1,7 +1,8 @@
 """SQLAlchemy database models for inventory management."""
 
-from sqlalchemy import Column, Integer, String, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, ForeignKey, Enum as SQLEnum, Text, Boolean, DateTime
 from sqlalchemy.orm import relationship
+from datetime import datetime
 import enum
 
 from .database import Base
@@ -55,3 +56,62 @@ class Barcode(Base):
     def __repr__(self):
         return f"<Barcode(id={self.id}, code='{self.code}', item_id={self.item_id})>"
 
+
+class Recipe(Base):
+    """
+    A saved recipe with ingredients and cooking steps.
+    """
+    __tablename__ = "recipes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    servings = Column(Integer, default=4)
+    prep_time_minutes = Column(Integer, nullable=True)
+    cook_time_minutes = Column(Integer, nullable=True)
+    is_favorite = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # One-to-many: one recipe has multiple ingredients
+    ingredients = relationship("RecipeIngredient", back_populates="recipe", cascade="all, delete-orphan")
+    # One-to-many: one recipe has multiple steps
+    steps = relationship("RecipeStep", back_populates="recipe", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Recipe(id={self.id}, name='{self.name}')>"
+
+
+class RecipeIngredient(Base):
+    """
+    An ingredient in a recipe with amount and unit.
+    """
+    __tablename__ = "recipe_ingredients"
+
+    id = Column(Integer, primary_key=True, index=True)
+    recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False)
+    name = Column(String, nullable=False)  # Ingredient name (may or may not match an Item)
+    amount = Column(String, nullable=True)  # e.g., "2", "1/2"
+    unit = Column(String, nullable=True)    # e.g., "cups", "tbsp", "pieces"
+    notes = Column(String, nullable=True)   # e.g., "diced", "room temperature"
+
+    recipe = relationship("Recipe", back_populates="ingredients")
+
+    def __repr__(self):
+        return f"<RecipeIngredient(id={self.id}, name='{self.name}')>"
+
+
+class RecipeStep(Base):
+    """
+    A cooking step in a recipe.
+    """
+    __tablename__ = "recipe_steps"
+
+    id = Column(Integer, primary_key=True, index=True)
+    recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False)
+    step_number = Column(Integer, nullable=False)
+    instruction = Column(Text, nullable=False)
+
+    recipe = relationship("Recipe", back_populates="steps")
+
+    def __repr__(self):
+        return f"<RecipeStep(id={self.id}, step={self.step_number})>"

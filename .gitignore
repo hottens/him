@@ -28,4 +28,7 @@ Thumbs.db
 
 # Docker
 .docker/
+
+# SSL Certificates
+certs/
 .coverage

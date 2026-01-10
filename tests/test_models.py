@@ -1,13 +1,13 @@
 """
 Unit tests for database models.
 
-Tests the Item and Barcode models and their relationships.
+Tests the Item, Barcode, Recipe, RecipeIngredient, and RecipeStep models.
 """
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from app.models import Item, Barcode, ItemLocation
+from app.models import Item, Barcode, ItemLocation, Recipe, RecipeIngredient, RecipeStep
 
 
 class TestItemModel:
@@ -179,4 +179,109 @@ class TestItemBarcodeRelationship:
 
         db_session.refresh(item)
         assert len(item.barcodes) == 0
+
+
+class TestRecipeModel:
+    """Tests for the Recipe model."""
+
+    def test_create_recipe(self, db_session):
+        """Test creating a basic recipe."""
+        recipe = Recipe(
+            name="Test Recipe",
+            description="A test recipe",
+            servings=4,
+            prep_time_minutes=10,
+            cook_time_minutes=20
+        )
+        db_session.add(recipe)
+        db_session.commit()
+
+        assert recipe.id is not None
+        assert recipe.name == "Test Recipe"
+        assert recipe.servings == 4
+        assert recipe.is_favorite is False
+
+    def test_recipe_default_values(self, db_session):
+        """Test recipe default values."""
+        recipe = Recipe(name="Minimal Recipe")
+        db_session.add(recipe)
+        db_session.commit()
+
+        assert recipe.servings == 4
+        assert recipe.is_favorite is False
+        assert recipe.created_at is not None
+
+    def test_recipe_with_ingredients(self, db_session):
+        """Test creating a recipe with ingredients."""
+        recipe = Recipe(name="Recipe With Ingredients")
+        db_session.add(recipe)
+        db_session.flush()
+
+        ing1 = RecipeIngredient(
+            recipe_id=recipe.id,
+            name="Flour",
+            amount="2",
+            unit="cups"
+        )
+        ing2 = RecipeIngredient(
+            recipe_id=recipe.id,
+            name="Sugar",
+            amount="1",
+            unit="cup",
+            notes="granulated"
+        )
+        db_session.add_all([ing1, ing2])
+        db_session.commit()
+
+        db_session.refresh(recipe)
+        assert len(recipe.ingredients) == 2
+        assert {i.name for i in recipe.ingredients} == {"Flour", "Sugar"}
+
+    def test_recipe_with_steps(self, db_session):
+        """Test creating a recipe with steps."""
+        recipe = Recipe(name="Recipe With Steps")
+        db_session.add(recipe)
+        db_session.flush()
+
+        step1 = RecipeStep(recipe_id=recipe.id, step_number=1, instruction="First step")
+        step2 = RecipeStep(recipe_id=recipe.id, step_number=2, instruction="Second step")
+        step3 = RecipeStep(recipe_id=recipe.id, step_number=3, instruction="Third step")
+        db_session.add_all([step1, step2, step3])
+        db_session.commit()
+
+        db_session.refresh(recipe)
+        assert len(recipe.steps) == 3
+
+    def test_recipe_cascade_delete(self, db_session):
+        """Test that deleting a recipe also deletes ingredients and steps."""
+        recipe = Recipe(name="Recipe To Delete")
+        db_session.add(recipe)
+        db_session.flush()
+
+        ing = RecipeIngredient(recipe_id=recipe.id, name="Test Ingredient")
+        step = RecipeStep(recipe_id=recipe.id, step_number=1, instruction="Test step")
+        db_session.add_all([ing, step])
+        db_session.commit()
+
+        # Verify they exist
+        assert db_session.query(RecipeIngredient).count() == 1
+        assert db_session.query(RecipeStep).count() == 1
+
+        # Delete recipe
+        db_session.delete(recipe)
+        db_session.commit()
+
+        # Verify cascade delete
+        assert db_session.query(Recipe).count() == 0
+        assert db_session.query(RecipeIngredient).count() == 0
+        assert db_session.query(RecipeStep).count() == 0
+
+    def test_recipe_repr(self, db_session):
+        """Test the string representation of a recipe."""
+        recipe = Recipe(name="Repr Test")
+        db_session.add(recipe)
+        db_session.commit()
+
+        repr_str = repr(recipe)
+        assert "Repr Test" in repr_str
 

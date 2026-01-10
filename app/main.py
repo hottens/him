@@ -2,19 +2,20 @@
 Home Inventory Management API
 
 A minimal, local-first application to track home inventory and grocery lists
-using barcode scanning.
+using barcode scanning, with AI-powered recipe suggestions.
 """
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 import os
 
 from .database import engine, get_db, Base
-from .models import Item, Barcode, ItemLocation
+from .models import Item, Barcode, ItemLocation, Recipe, RecipeIngredient, RecipeStep
 from . import schemas
+from . import gemini_service
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -22,7 +23,7 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(
     title="Home Inventory Manager",
     description="Local-first inventory and grocery list management with barcode scanning",
-    version="1.0.0"
+    version="2.0.0"
 )
 
 # --- Static Files ---
@@ -43,7 +44,10 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint for container orchestration."""
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "gemini_configured": gemini_service.is_configured()
+    }
 
 
 # --- Barcode Endpoints ---
@@ -240,7 +244,7 @@ async def move_to_grocery(item_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/items/{item_id}/remove", response_model=schemas.ItemResponse)
 async def remove_from_lists(item_id: int, db: Session = Depends(get_db)):
-    """Remove an item from both inventory and grocery list."""
+    """Remove an item from both inventory and grocery list (set to neither)."""
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -293,3 +297,441 @@ async def search_items(q: str, db: Session = Depends(get_db)):
     
     return items
 
+
+# --- Recipe Endpoints ---
+
+@app.get("/api/recipes", response_model=schemas.RecipeListResponse)
+async def list_recipes(
+    favorites_only: bool = False,
+    db: Session = Depends(get_db)
+):
+    """List all saved recipes."""
+    query = db.query(Recipe)
+    if favorites_only:
+        query = query.filter(Recipe.is_favorite == True)
+    recipes = query.order_by(Recipe.created_at.desc()).all()
+    return schemas.RecipeListResponse(count=len(recipes), recipes=recipes)
+
+
+@app.post("/api/recipes", response_model=schemas.RecipeResponse)
+async def create_recipe(recipe: schemas.RecipeCreate, db: Session = Depends(get_db)):
+    """Create a new recipe."""
+    db_recipe = Recipe(
+        name=recipe.name,
+        description=recipe.description,
+        servings=recipe.servings,
+        prep_time_minutes=recipe.prep_time_minutes,
+        cook_time_minutes=recipe.cook_time_minutes,
+        is_favorite=recipe.is_favorite
+    )
+    db.add(db_recipe)
+    db.flush()
+    
+    # Add ingredients
+    for ing in recipe.ingredients:
+        db_ingredient = RecipeIngredient(
+            recipe_id=db_recipe.id,
+            name=ing.name,
+            amount=ing.amount,
+            unit=ing.unit,
+            notes=ing.notes
+        )
+        db.add(db_ingredient)
+    
+    # Add steps
+    for step in recipe.steps:
+        db_step = RecipeStep(
+            recipe_id=db_recipe.id,
+            step_number=step.step_number,
+            instruction=step.instruction
+        )
+        db.add(db_step)
+    
+    db.commit()
+    db.refresh(db_recipe)
+    
+    return db_recipe
+
+
+@app.get("/api/recipes/{recipe_id}", response_model=schemas.RecipeResponse)
+async def get_recipe(recipe_id: int, db: Session = Depends(get_db)):
+    """Get a single recipe by ID."""
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return recipe
+
+
+@app.patch("/api/recipes/{recipe_id}", response_model=schemas.RecipeResponse)
+async def update_recipe(
+    recipe_id: int,
+    update: schemas.RecipeUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update a recipe's metadata (not ingredients/steps)."""
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    
+    for field, value in update.model_dump(exclude_unset=True).items():
+        setattr(recipe, field, value)
+    
+    db.commit()
+    db.refresh(recipe)
+    
+    return recipe
+
+
+@app.delete("/api/recipes/{recipe_id}")
+async def delete_recipe(recipe_id: int, db: Session = Depends(get_db)):
+    """Delete a recipe."""
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    
+    db.delete(recipe)
+    db.commit()
+    
+    return {"deleted": True, "id": recipe_id}
+
+
+@app.post("/api/recipes/{recipe_id}/favorite", response_model=schemas.RecipeResponse)
+async def toggle_favorite(recipe_id: int, db: Session = Depends(get_db)):
+    """Toggle a recipe's favorite status."""
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    
+    recipe.is_favorite = not recipe.is_favorite
+    db.commit()
+    db.refresh(recipe)
+    
+    return recipe
+
+
+# --- Gemini AI Endpoints ---
+
+class RecipeSuggestionRequest(schemas.BaseModel):
+    """Request body for recipe suggestions."""
+    query: Optional[str] = None  # e.g., "soup recipes", "quick dinner", "vegetarian"
+
+
+@app.post("/api/ai/recipe-suggestions", response_model=schemas.GeminiRecipeSuggestionsResponse)
+async def get_recipe_suggestions(
+    request: Optional[RecipeSuggestionRequest] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get AI-powered recipe suggestions based on current inventory.
+    
+    Optionally provide a query for guided suggestions (e.g., "soup", "quick meals").
+    Requires GEMINI_API_KEY environment variable to be set.
+    """
+    if not gemini_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Gemini API is not configured. Set GEMINI_API_KEY environment variable."
+        )
+    
+    # Get inventory items
+    inventory_items = db.query(Item).filter(
+        Item.location == ItemLocation.INVENTORY
+    ).all()
+    item_names = [item.name for item in inventory_items]
+    
+    if not item_names:
+        raise HTTPException(
+            status_code=400,
+            detail="No items in inventory. Add some items first."
+        )
+    
+    # Extract query from request
+    query = request.query if request else None
+    
+    # Get suggestions from Gemini
+    result = gemini_service.generate_recipe_suggestions(item_names, query)
+    
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+    
+    return result
+
+
+@app.post("/api/ai/grocery-suggestions", response_model=schemas.GeminiGrocerySuggestionsResponse)
+async def get_grocery_suggestions(
+    preferences: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get AI-powered grocery suggestions based on inventory and favorite recipes.
+    
+    Requires GEMINI_API_KEY environment variable to be set.
+    """
+    if not gemini_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Gemini API is not configured. Set GEMINI_API_KEY environment variable."
+        )
+    
+    # Get inventory items
+    inventory_items = db.query(Item).filter(
+        Item.location == ItemLocation.INVENTORY
+    ).all()
+    item_names = [item.name for item in inventory_items]
+    
+    # Get favorite recipes with their ingredients
+    favorite_recipes = db.query(Recipe).filter(Recipe.is_favorite == True).all()
+    recipes_data = []
+    for recipe in favorite_recipes:
+        recipes_data.append({
+            "name": recipe.name,
+            "ingredients": [
+                {"name": ing.name, "amount": ing.amount, "unit": ing.unit}
+                for ing in recipe.ingredients
+            ]
+        })
+    
+    # Get suggestions from Gemini
+    result = gemini_service.generate_grocery_suggestions(item_names, recipes_data, preferences)
+    
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+    
+    return result
+
+
+# --- Beautiful Recipe View Page ---
+
+@app.get("/recipe/{recipe_id}", response_class=HTMLResponse, include_in_schema=False)
+async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
+    """Serve a beautiful, user-friendly recipe viewing page."""
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    
+    # Sort steps by step_number
+    sorted_steps = sorted(recipe.steps, key=lambda s: s.step_number)
+    
+    # Generate ingredients HTML
+    ingredients_html = ""
+    for ing in recipe.ingredients:
+        amount_str = f"{ing.amount} " if ing.amount else ""
+        unit_str = f"{ing.unit} " if ing.unit else ""
+        notes_str = f" <span class='notes'>({ing.notes})</span>" if ing.notes else ""
+        ingredients_html += f"<li>{amount_str}{unit_str}{ing.name}{notes_str}</li>"
+    
+    # Generate steps HTML
+    steps_html = ""
+    for step in sorted_steps:
+        steps_html += f"<li>{step.instruction}</li>"
+    
+    # Calculate total time
+    total_time = (recipe.prep_time_minutes or 0) + (recipe.cook_time_minutes or 0)
+    time_str = f"{total_time} min" if total_time else "—"
+    
+    html = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{recipe.name}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {{
+            --bg: #faf9f7;
+            --text: #1a1a1a;
+            --text-muted: #666;
+            --accent: #c45c26;
+            --border: #e5e3df;
+        }}
+        
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        
+        body {{
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            padding: 2rem 1rem;
+            max-width: 680px;
+            margin: 0 auto;
+        }}
+        
+        .back-link {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.875rem;
+            margin-bottom: 2rem;
+        }}
+        
+        .back-link:hover {{ color: var(--accent); }}
+        
+        h1 {{
+            font-family: 'Crimson Pro', serif;
+            font-size: 2.5rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            line-height: 1.2;
+        }}
+        
+        .description {{
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            margin-bottom: 1.5rem;
+        }}
+        
+        .meta {{
+            display: flex;
+            gap: 2rem;
+            padding: 1rem 0;
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 2rem;
+        }}
+        
+        .meta-item {{
+            display: flex;
+            flex-direction: column;
+        }}
+        
+        .meta-label {{
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }}
+        
+        .meta-value {{
+            font-size: 1.125rem;
+            font-weight: 500;
+        }}
+        
+        h2 {{
+            font-family: 'Crimson Pro', serif;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 2rem 0 1rem;
+            color: var(--accent);
+        }}
+        
+        .ingredients {{
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }}
+        
+        .ingredients ul {{
+            list-style: none;
+        }}
+        
+        .ingredients li {{
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border);
+        }}
+        
+        .ingredients li:last-child {{ border-bottom: none; }}
+        
+        .ingredients .notes {{
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }}
+        
+        .steps ol {{
+            padding-left: 1.5rem;
+        }}
+        
+        .steps li {{
+            padding: 0.75rem 0;
+            padding-left: 0.5rem;
+        }}
+        
+        .steps li::marker {{
+            color: var(--accent);
+            font-weight: 600;
+        }}
+        
+        .favorite {{
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: {'var(--accent)' if recipe.is_favorite else '#fff'};
+            color: {'#fff' if recipe.is_favorite else 'var(--accent)'};
+            border: 2px solid var(--accent);
+            font-size: 1.5rem;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: all 0.2s;
+        }}
+        
+        .favorite:hover {{
+            transform: scale(1.1);
+        }}
+        
+        @media (max-width: 480px) {{
+            h1 {{ font-size: 2rem; }}
+            .meta {{ gap: 1rem; flex-wrap: wrap; }}
+        }}
+    </style>
+</head>
+<body>
+    <a href="/" class="back-link">← Back to Inventory</a>
+    
+    <h1>{recipe.name}</h1>
+    
+    {'<p class="description">' + recipe.description + '</p>' if recipe.description else ''}
+    
+    <div class="meta">
+        <div class="meta-item">
+            <span class="meta-label">Servings</span>
+            <span class="meta-value">{recipe.servings}</span>
+        </div>
+        <div class="meta-item">
+            <span class="meta-label">Prep</span>
+            <span class="meta-value">{recipe.prep_time_minutes or '—'} min</span>
+        </div>
+        <div class="meta-item">
+            <span class="meta-label">Cook</span>
+            <span class="meta-value">{recipe.cook_time_minutes or '—'} min</span>
+        </div>
+        <div class="meta-item">
+            <span class="meta-label">Total</span>
+            <span class="meta-value">{time_str}</span>
+        </div>
+    </div>
+    
+    <h2>Ingredients</h2>
+    <div class="ingredients">
+        <ul>
+            {ingredients_html}
+        </ul>
+    </div>
+    
+    <h2>Instructions</h2>
+    <div class="steps">
+        <ol>
+            {steps_html}
+        </ol>
+    </div>
+    
+    <button class="favorite" onclick="toggleFavorite()" title="{'Remove from favorites' if recipe.is_favorite else 'Add to favorites'}">
+        {'★' if recipe.is_favorite else '☆'}
+    </button>
+    
+    <script>
+        async function toggleFavorite() {{
+            await fetch('/api/recipes/{recipe.id}/favorite', {{ method: 'POST' }});
+            location.reload();
+        }}
+    </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)

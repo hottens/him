@@ -107,3 +107,28 @@ def sample_items(client):
     
     return items
 
+
+@pytest.fixture
+def sample_recipe(client):
+    """Create a sample recipe for testing."""
+    recipe_data = {
+        "name": "Simple Pasta",
+        "description": "A quick and easy pasta dish",
+        "servings": 4,
+        "prep_time_minutes": 10,
+        "cook_time_minutes": 20,
+        "is_favorite": False,
+        "ingredients": [
+            {"name": "Pasta", "amount": "400", "unit": "g", "notes": None},
+            {"name": "Olive Oil", "amount": "2", "unit": "tbsp", "notes": None},
+            {"name": "Garlic", "amount": "3", "unit": "cloves", "notes": "minced"}
+        ],
+        "steps": [
+            {"step_number": 1, "instruction": "Boil water and cook pasta according to package directions."},
+            {"step_number": 2, "instruction": "Heat olive oil in a pan and sauté garlic."},
+            {"step_number": 3, "instruction": "Toss pasta with garlic oil and serve."}
+        ]
+    }
+    response = client.post("/api/recipes", json=recipe_data)
+    return response.json()
+
