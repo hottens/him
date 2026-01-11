@@ -587,6 +587,7 @@ async def spoonacular_discover_recipes(
     Discover recipes based on current inventory ingredients.
     
     This is the primary way to find recipes - based on what you have.
+    Translates ingredients to English using Gemini before searching.
     Requires SPOONACULAR_API_KEY environment variable to be set.
     """
     if not spoonacular_service.is_configured():
@@ -607,14 +608,21 @@ async def spoonacular_discover_recipes(
             detail="No items in inventory. Add some items first."
         )
     
+    # Translate ingredients to English using Gemini if configured
+    if gemini_service.is_configured():
+        english_ingredients = gemini_service.translate_ingredients_to_english(ingredient_names)
+    else:
+        english_ingredients = ingredient_names
+    
     result = spoonacular_service.search_by_ingredients(
-        ingredients=ingredient_names,
+        ingredients=english_ingredients,
         number=request.number
     )
     
     return {
         "recipes": result,
-        "ingredients_used": ingredient_names
+        "ingredients_used": ingredient_names,
+        "ingredients_english": english_ingredients
     }
 
 

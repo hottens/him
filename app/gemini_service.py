@@ -212,6 +212,59 @@ def is_configured() -> bool:
     return GEMINI_API_KEY is not None and len(GEMINI_API_KEY) > 0
 
 
+def translate_ingredients_to_english(ingredients: list[str]) -> list[str]:
+    """
+    Translate ingredient names to English for Spoonacular API compatibility.
+    
+    Args:
+        ingredients: List of ingredient names (possibly in other languages)
+    
+    Returns:
+        List of ingredient names translated to English
+    """
+    if not ingredients:
+        return []
+    
+    model = get_model()
+    
+    ingredients_str = "\n".join([f"- {ing}" for ing in ingredients])
+    
+    prompt = f"""Translate these ingredient/food item names to English. 
+If they are already in English, keep them as-is.
+Return ONLY a JSON array of strings with the English names, nothing else.
+
+Items to translate:
+{ingredients_str}
+
+Example output format:
+["milk", "eggs", "flour", "chicken breast"]
+
+Respond with ONLY the JSON array, no explanation."""
+
+    try:
+        response = model.generate_content(prompt)
+        response_text = response.text.strip()
+        
+        # Extract JSON from potential markdown wrapping
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0].strip()
+        
+        import json
+        translated = json.loads(response_text)
+        
+        # Ensure we got a list of strings
+        if isinstance(translated, list):
+            return [str(item) for item in translated]
+        else:
+            return ingredients  # Fall back to original
+    except Exception as e:
+        # If translation fails, return original ingredients
+        print(f"Translation failed: {e}")
+        return ingredients
+
+
 def parse_spoonacular_recipe(spoonacular_data: dict) -> dict:
     """
     Use Gemini to parse a Spoonacular recipe into our clean local format.

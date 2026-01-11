@@ -71,17 +71,12 @@ From the Inventory or Grocery tabs:
 
 ### Recipe Features
 
-**AI Recipe Suggestions (Gemini):**
-1. Go to Inventory tab
-2. Click "Suggest Recipes" to get AI-generated recipes based on what you have
-3. Optionally enter a query like "soup" or "quick meal" for guided suggestions
-4. Save recipes to your collection
-
-**Discover Recipes (Spoonacular):**
+**Discover Recipes (Spoonacular + Gemini):**
 1. Go to Browse tab
 2. Click "Find What I Can Cook" to discover recipes using your inventory
-3. View recipes sorted by how many ingredients you already have
-4. Import recipes - Gemini AI parses them into clean, structured format
+3. Ingredients are automatically translated to English via Gemini
+4. View recipes sorted by how many ingredients you already have
+5. Import recipes - Gemini AI parses them into clean, structured format
 
 **Favorites:**
 - Star recipes to mark as favorites
@@ -161,14 +156,15 @@ These return clean, stable JSON for REST sensors:
 | `DELETE` | `/api/recipes/{id}` | Delete recipe |
 | `POST` | `/api/recipes/{id}/favorite` | Toggle favorite status |
 
-### AI Suggestions (Gemini)
+### AI Grocery Suggestions (Gemini)
 
 Requires `GEMINI_API_KEY` environment variable.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/ai/recipe-suggestions` | Get AI recipe suggestions |
 | `POST` | `/api/ai/grocery-suggestions` | Get AI grocery suggestions |
+
+*Note: Gemini is also used internally for translating ingredients to English before Spoonacular searches, and for parsing imported recipes.*
 
 ### Recipe Discovery (Spoonacular + Gemini)
 

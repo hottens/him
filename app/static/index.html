@@ -749,18 +749,6 @@
                 </div>
             </div>
             
-            <div class="ai-section">
-                <h3>✨ What Can I Cook?</h3>
-                <div class="form-group" style="margin-bottom: 0.75rem;">
-                    <input type="text" class="form-input" id="inventory-recipe-query" 
-                           placeholder="e.g., soup, pasta, quick meal...">
-                </div>
-                <button class="btn btn-purple btn-block" onclick="getRecipeSuggestionsFromInventory()" id="inventory-recipe-btn">
-                    Suggest Recipes
-                </button>
-                <div id="inventory-recipe-suggestions"></div>
-            </div>
-            
             <div class="section-divider">Items in Stock</div>
             <div id="inventory-list" class="item-list"></div>
         </div>
@@ -796,23 +784,9 @@
 
         <!-- Recipes Panel -->
         <div id="recipes" class="panel">
-            <div class="ai-section">
-                <h3>✨ AI Recipe Ideas</h3>
-                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
-                    Get recipe suggestions based on your current inventory
-                </p>
-                <div class="form-group" style="margin-bottom: 0.75rem;">
-                    <input type="text" class="form-input" id="recipe-query-input" 
-                           placeholder="e.g., soup, quick dinner, Italian, vegetarian...">
-                </div>
-                <button class="btn btn-purple btn-block" onclick="getRecipeSuggestions()" id="recipe-suggest-btn">
-                    Suggest Recipes
-                </button>
-                <div id="recipe-suggestions"></div>
-            </div>
-
-            <div class="section-divider">Saved Recipes</div>
-            
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                Your saved recipes. Use the Browse tab to discover new recipes.
+            </p>
             <div id="recipe-list"></div>
         </div>
 
@@ -859,23 +833,6 @@
                     <button class="btn btn-success" onclick="createItem('inventory')">🏠 Inventory</button>
                     <button class="btn btn-warning" onclick="createItem('grocery_list')">🛒 Grocery</button>
                     <button class="btn" onclick="createItem('neither')">📦 Archive</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Save Recipe Modal -->
-    <div class="modal-overlay" id="save-recipe-modal">
-        <div class="modal">
-            <div class="modal-header">
-                <h2>Save Recipe</h2>
-                <button class="modal-close" onclick="closeSaveRecipeModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <p style="margin-bottom: 1rem;">Save "<span id="save-recipe-name"></span>" to your recipes?</p>
-                <div class="location-buttons">
-                    <button class="btn" onclick="closeSaveRecipeModal()">Cancel</button>
-                    <button class="btn btn-purple" onclick="confirmSaveRecipe()">Save Recipe</button>
                 </div>
             </div>
         </div>
@@ -956,8 +913,6 @@
         let pendingBarcode = null;
         let selectedExistingItem = null;
         let allItems = [];
-        let pendingRecipeToSave = null;
-
         // API base URL
         const API_BASE = '/api';
 
@@ -986,12 +941,6 @@
             });
             document.getElementById('grocery-add-input').addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') quickAddToGrocery();
-            });
-            document.getElementById('recipe-query-input').addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') getRecipeSuggestions();
-            });
-            document.getElementById('inventory-recipe-query').addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') getRecipeSuggestionsFromInventory();
             });
 
             // Load initial data
@@ -1447,7 +1396,7 @@
                             <div class="empty-state-icon">📖</div>
                             <p>No saved recipes yet</p>
                             <p style="font-size: 0.85rem; margin-top: 0.5rem;">
-                                Use AI suggestions above to discover recipes!
+                                Use the Browse tab to discover and import recipes!
                             </p>
                         </div>
                     `;
@@ -1559,150 +1508,6 @@
                 }
             } catch (err) {
                 console.error('Error loading favorites:', err);
-            }
-        }
-
-        async function getRecipeSuggestionsFromInventory() {
-            const btn = document.getElementById('inventory-recipe-btn');
-            const container = document.getElementById('inventory-recipe-suggestions');
-            const queryInput = document.getElementById('inventory-recipe-query');
-            const query = queryInput.value.trim();
-            
-            btn.disabled = true;
-            btn.innerHTML = '<span class="loading"></span> Thinking...';
-            container.innerHTML = '';
-
-            try {
-                const response = await fetch(`${API_BASE}/ai/recipe-suggestions`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: query || null })
-                });
-                
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.detail);
-                }
-
-                const data = await response.json();
-                
-                container.innerHTML = data.suggestions.map((recipe, index) => `
-                    <div class="suggestion-card">
-                        <h4>${recipe.name}</h4>
-                        <p>${recipe.description}</p>
-                        <p style="margin-top: 0.5rem; font-size: 0.8rem;">
-                            ${recipe.servings} servings
-                            ${recipe.prep_time_minutes ? ` • ${recipe.prep_time_minutes}min prep` : ''}
-                            ${recipe.cook_time_minutes ? ` • ${recipe.cook_time_minutes}min cook` : ''}
-                        </p>
-                        <button class="btn btn-purple" style="margin-top: 0.75rem;" 
-                                onclick="event.stopPropagation(); saveRecipeSuggestionFromInventory(${index})">
-                            Save Recipe
-                        </button>
-                    </div>
-                `).join('');
-                
-                // Store suggestions for saving
-                window.inventoryRecipeSuggestions = data.suggestions;
-                
-            } catch (err) {
-                container.innerHTML = `<p style="color: var(--accent-red);">${err.message}</p>`;
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = 'Suggest Recipes';
-            }
-        }
-
-        async function saveRecipeSuggestionFromInventory(index) {
-            const recipe = window.inventoryRecipeSuggestions[index];
-            pendingRecipeToSave = recipe;
-            document.getElementById('save-recipe-name').textContent = recipe.name;
-            document.getElementById('save-recipe-modal').classList.add('active');
-        }
-
-        async function getRecipeSuggestions() {
-            const btn = document.getElementById('recipe-suggest-btn');
-            const container = document.getElementById('recipe-suggestions');
-            const queryInput = document.getElementById('recipe-query-input');
-            const query = queryInput.value.trim();
-            
-            btn.disabled = true;
-            btn.innerHTML = '<span class="loading"></span> Thinking...';
-            container.innerHTML = '';
-
-            try {
-                const response = await fetch(`${API_BASE}/ai/recipe-suggestions`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: query || null })
-                });
-                
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.detail);
-                }
-
-                const data = await response.json();
-                
-                container.innerHTML = data.suggestions.map((recipe, index) => `
-                    <div class="suggestion-card">
-                        <h4>${recipe.name}</h4>
-                        <p>${recipe.description}</p>
-                        <p style="margin-top: 0.5rem; font-size: 0.8rem;">
-                            ${recipe.servings} servings
-                            ${recipe.prep_time_minutes ? ` • ${recipe.prep_time_minutes}min prep` : ''}
-                            ${recipe.cook_time_minutes ? ` • ${recipe.cook_time_minutes}min cook` : ''}
-                        </p>
-                        <button class="btn btn-purple" style="margin-top: 0.75rem;" 
-                                onclick="saveRecipeSuggestion(${index})">
-                            Save Recipe
-                        </button>
-                    </div>
-                `).join('');
-                
-                // Store suggestions for saving
-                window.recipeSuggestions = data.suggestions;
-                
-            } catch (err) {
-                container.innerHTML = `<p style="color: var(--accent-red);">${err.message}</p>`;
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = 'Suggest Recipes';
-            }
-        }
-
-        function saveRecipeSuggestion(index) {
-            const recipe = window.recipeSuggestions[index];
-            pendingRecipeToSave = recipe;
-            document.getElementById('save-recipe-name').textContent = recipe.name;
-            document.getElementById('save-recipe-modal').classList.add('active');
-        }
-
-        function closeSaveRecipeModal() {
-            document.getElementById('save-recipe-modal').classList.remove('active');
-            pendingRecipeToSave = null;
-        }
-
-        async function confirmSaveRecipe() {
-            if (!pendingRecipeToSave) return;
-
-            try {
-                const response = await fetch(`${API_BASE}/recipes`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(pendingRecipeToSave)
-                });
-
-                if (!response.ok) {
-                    throw new Error('Failed to save recipe');
-                }
-
-                showToast(`Saved: ${pendingRecipeToSave.name}`, 'success');
-                closeSaveRecipeModal();
-                loadRecipes();
-                loadFavorites();
-            } catch (err) {
-                showToast(err.message, 'error');
             }
         }
 
