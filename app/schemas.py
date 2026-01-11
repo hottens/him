@@ -195,3 +195,24 @@ class GeminiGrocerySuggestionsResponse(BaseModel):
     suggestions: list[GeminiGrocerySuggestion]
     based_on_recipes: list[str]  # Recipe names considered
     current_inventory: list[str]  # What's already in inventory
+
+
+# --- Spoonacular Schemas ---
+
+class SpoonacularByIngredientsRequest(BaseModel):
+    """Request for discovering recipes by ingredients."""
+    number: int = 10
+
+
+# --- Recipe Full Update Schema ---
+
+class RecipeFullUpdate(BaseModel):
+    """Full update for a recipe including ingredients and steps."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    servings: Optional[int] = None
+    prep_time_minutes: Optional[int] = None
+    cook_time_minutes: Optional[int] = None
+    is_favorite: Optional[bool] = None
+    ingredients: Optional[list[RecipeIngredientCreate]] = None
+    steps: Optional[list[RecipeStepCreate]] = None

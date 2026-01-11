@@ -692,6 +692,7 @@
         <button class="tab" data-panel="grocery">🛒 Grocery<span class="count" id="grocery-count">0</span></button>
         <button class="tab" data-panel="favorites">⭐ Favorites<span class="count" id="favorites-count">0</span></button>
         <button class="tab" data-panel="recipes">📖 Recipes</button>
+        <button class="tab" data-panel="browse">🔍 Browse</button>
     </nav>
 
     <main>
@@ -814,6 +815,24 @@
             
             <div id="recipe-list"></div>
         </div>
+
+        <!-- Browse (Spoonacular) Panel -->
+        <div id="browse" class="panel">
+            <div class="ai-section" style="border-color: var(--accent-green);">
+                <h3 style="color: var(--accent-green);">🍳 Discover Recipes</h3>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                    Find recipes from the web based on your current inventory
+                </p>
+                <button class="btn btn-success btn-block" onclick="discoverRecipes()" id="discover-btn">
+                    🔍 Find What I Can Cook
+                </button>
+                <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.5rem; text-align: center;">
+                    Searches millions of recipes using Spoonacular API
+                </p>
+            </div>
+
+            <div id="spoon-results"></div>
+        </div>
     </main>
 
     <!-- New Item Modal -->
@@ -858,6 +877,70 @@
                     <button class="btn" onclick="closeSaveRecipeModal()">Cancel</button>
                     <button class="btn btn-purple" onclick="confirmSaveRecipe()">Save Recipe</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Item Modal -->
+    <div class="modal-overlay" id="edit-item-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Edit Item</h2>
+                <button class="modal-close" onclick="closeEditItemModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Item Name</label>
+                    <input type="text" class="form-input" id="edit-item-name">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Location</label>
+                    <select class="form-select" id="edit-item-location">
+                        <option value="inventory">🏠 Inventory</option>
+                        <option value="grocery_list">🛒 Grocery List</option>
+                        <option value="neither">📦 Archive</option>
+                    </select>
+                </div>
+                <div class="location-buttons">
+                    <button class="btn btn-danger" onclick="deleteEditingItem()" style="background: var(--accent-red); border-color: var(--accent-red);">Delete</button>
+                    <button class="btn" onclick="closeEditItemModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="saveEditingItem()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Grocery Suggestion Match Modal -->
+    <div class="modal-overlay" id="grocery-match-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Add to Grocery List</h2>
+                <button class="modal-close" onclick="closeGroceryMatchModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 0.75rem;">Adding: <strong id="grocery-match-name"></strong></p>
+                <div id="grocery-match-results"></div>
+                <div class="form-group" style="margin-top: 1rem;">
+                    <label class="form-label">Or create as new item</label>
+                    <input type="text" class="form-input" id="grocery-match-new-name" placeholder="Item name">
+                </div>
+                <div class="location-buttons">
+                    <button class="btn" onclick="closeGroceryMatchModal()">Cancel</button>
+                    <button class="btn btn-warning" onclick="confirmGroceryMatch()">Add to Grocery</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Spoonacular Recipe Detail Modal -->
+    <div class="modal-overlay" id="spoon-detail-modal">
+        <div class="modal" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2 id="spoon-detail-title">Recipe</h2>
+                <button class="modal-close" onclick="closeSpoonDetailModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="spoon-detail-content">
+                <!-- Content populated by JS -->
             </div>
         </div>
     </div>
@@ -1334,7 +1417,7 @@
             
             return `
                 <div class="item-card">
-                    <div class="item-info">
+                    <div class="item-info" onclick="openEditItemModal(${item.id}, '${item.name.replace(/'/g, "\\'")}', '${item.location}')" style="cursor: pointer;">
                         <div class="item-name">${item.name}</div>
                         ${barcodes ? `<div class="item-barcodes">${barcodes}</div>` : ''}
                     </div>
@@ -1345,6 +1428,7 @@
                             <button class="btn btn-success btn-sm" onclick="moveItem(${item.id}, 'inventory')" title="To Inventory">🏠</button>
                         `}
                         <button class="btn btn-sm" onclick="removeItem(${item.id})" title="Archive">📦</button>
+                        <button class="btn btn-sm" onclick="openEditItemModal(${item.id}, '${item.name.replace(/'/g, "\\'")}', '${item.location}')" title="Edit">✏️</button>
                     </div>
                 </div>
             `;
@@ -1369,15 +1453,25 @@
                     `;
                 } else {
                     listDiv.innerHTML = data.recipes.map(recipe => `
-                        <div class="recipe-card" onclick="window.location.href='/recipe/${recipe.id}'">
-                            <h3>
-                                ${recipe.is_favorite ? '<span class="favorite-star">★</span> ' : ''}
-                                ${recipe.name}
-                            </h3>
-                            <div class="recipe-meta">
-                                ${recipe.servings} servings
-                                ${recipe.prep_time_minutes ? ` • ${recipe.prep_time_minutes}min prep` : ''}
-                                ${recipe.cook_time_minutes ? ` • ${recipe.cook_time_minutes}min cook` : ''}
+                        <div class="recipe-card" style="display: flex; justify-content: space-between; align-items: center;">
+                            <div onclick="window.location.href='/recipe/${recipe.id}'" style="flex: 1; cursor: pointer;">
+                                <h3>
+                                    ${recipe.is_favorite ? '<span class="favorite-star">★</span> ' : ''}
+                                    ${recipe.name}
+                                </h3>
+                                <div class="recipe-meta">
+                                    ${recipe.servings} servings
+                                    ${recipe.prep_time_minutes ? ` • ${recipe.prep_time_minutes}min prep` : ''}
+                                    ${recipe.cook_time_minutes ? ` • ${recipe.cook_time_minutes}min cook` : ''}
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; flex-shrink: 0;" onclick="event.stopPropagation();">
+                                <button class="btn btn-sm" onclick="toggleFavoriteRecipe(${recipe.id})" title="${recipe.is_favorite ? 'Unfavorite' : 'Favorite'}">
+                                    ${recipe.is_favorite ? '★' : '☆'}
+                                </button>
+                                <button class="btn btn-sm" onclick="deleteRecipe(${recipe.id}, '${recipe.name.replace(/'/g, "\\'")}')" title="Delete" style="color: var(--accent-red);">
+                                    🗑
+                                </button>
                             </div>
                         </div>
                     `).join('');
@@ -1440,18 +1534,24 @@
                         }
                         
                         return `
-                            <div class="recipe-card" onclick="window.location.href='/recipe/${recipe.id}'">
-                                <h3>
-                                    <span class="favorite-star">★</span>
-                                    ${recipe.name}
-                                </h3>
-                                <div class="recipe-meta">
-                                    ${recipe.servings} servings
-                                    ${recipe.prep_time_minutes ? ` • ${recipe.prep_time_minutes}min prep` : ''}
-                                    ${recipe.cook_time_minutes ? ` • ${recipe.cook_time_minutes}min cook` : ''}
+                            <div class="recipe-card" style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                <div onclick="window.location.href='/recipe/${recipe.id}'" style="flex: 1; cursor: pointer;">
+                                    <h3>
+                                        <span class="favorite-star">★</span>
+                                        ${recipe.name}
+                                    </h3>
+                                    <div class="recipe-meta">
+                                        ${recipe.servings} servings
+                                        ${recipe.prep_time_minutes ? ` • ${recipe.prep_time_minutes}min prep` : ''}
+                                        ${recipe.cook_time_minutes ? ` • ${recipe.cook_time_minutes}min cook` : ''}
+                                    </div>
+                                    <div class="ingredient-status ${statusClass}">
+                                        ${statusText}
+                                    </div>
                                 </div>
-                                <div class="ingredient-status ${statusClass}">
-                                    ${statusText}
+                                <div style="display: flex; gap: 0.5rem; flex-shrink: 0;" onclick="event.stopPropagation();">
+                                    <button class="btn btn-sm" onclick="toggleFavoriteRecipe(${recipe.id})" title="Unfavorite">★</button>
+                                    <button class="btn btn-sm" onclick="deleteRecipe(${recipe.id}, '${recipe.name.replace(/'/g, "\\'")}')" title="Delete" style="color: var(--accent-red);">🗑</button>
                                 </div>
                             </div>
                         `;
@@ -1635,7 +1735,7 @@
                                         <strong>${s.item_name}</strong>
                                         <p>${s.reason}</p>
                                     </div>
-                                    <button class="btn btn-warning btn-sm" onclick="addSuggestionToGrocery('${s.item_name.replace(/'/g, "\\'")}')">
+                                    <button class="btn btn-warning btn-sm" onclick="addSuggestionToGroceryWithMatch('${s.item_name.replace(/'/g, "\\'")}')">
                                         + Add
                                     </button>
                                 </div>
@@ -1682,6 +1782,348 @@
             container.appendChild(toast);
 
             setTimeout(() => toast.remove(), 3000);
+        }
+
+        // ========== Edit Item Modal ==========
+        let editingItemId = null;
+
+        function openEditItemModal(id, name, location) {
+            editingItemId = id;
+            document.getElementById('edit-item-name').value = name;
+            document.getElementById('edit-item-location').value = location;
+            document.getElementById('edit-item-modal').classList.add('active');
+        }
+
+        function closeEditItemModal() {
+            document.getElementById('edit-item-modal').classList.remove('active');
+            editingItemId = null;
+        }
+
+        async function saveEditingItem() {
+            if (!editingItemId) return;
+
+            const name = document.getElementById('edit-item-name').value.trim();
+            const location = document.getElementById('edit-item-location').value;
+
+            if (!name) {
+                showToast('Item name cannot be empty', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/items/${editingItemId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, location })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail);
+                }
+
+                showToast('Item updated', 'success');
+                closeEditItemModal();
+                loadInventory();
+                loadGrocery();
+                loadAllItems();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function deleteEditingItem() {
+            if (!editingItemId) return;
+
+            if (!confirm('Are you sure you want to delete this item? This cannot be undone.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/items/${editingItemId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to delete item');
+                }
+
+                showToast('Item deleted', 'success');
+                closeEditItemModal();
+                loadInventory();
+                loadGrocery();
+                loadAllItems();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        // ========== Grocery Suggestion Matching ==========
+        let pendingGroceryItem = null;
+        let selectedMatchItem = null;
+
+        async function addSuggestionToGroceryWithMatch(itemName) {
+            pendingGroceryItem = itemName;
+            selectedMatchItem = null;
+            
+            document.getElementById('grocery-match-name').textContent = itemName;
+            document.getElementById('grocery-match-new-name').value = itemName;
+            
+            // Search for similar items
+            const resultsDiv = document.getElementById('grocery-match-results');
+            const matches = allItems.filter(i => 
+                i.name.toLowerCase().includes(itemName.toLowerCase()) ||
+                itemName.toLowerCase().includes(i.name.toLowerCase())
+            );
+            
+            if (matches.length > 0) {
+                resultsDiv.innerHTML = `
+                    <label class="form-label">Match with existing item:</label>
+                    <div class="search-results" style="display: block; max-height: 150px;">
+                        ${matches.slice(0, 5).map(item => `
+                            <div class="search-result-item ${selectedMatchItem?.id === item.id ? 'selected' : ''}" 
+                                 onclick="selectGroceryMatch(${item.id}, '${item.name.replace(/'/g, "\\'")}')">
+                                ${item.name}
+                                <small style="color: var(--text-secondary);">
+                                    ${item.location === 'inventory' ? '🏠' : item.location === 'grocery_list' ? '🛒' : '📦'}
+                                </small>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } else {
+                resultsDiv.innerHTML = '<p style="color: var(--text-secondary); font-size: 0.85rem;">No similar items found in database.</p>';
+            }
+            
+            document.getElementById('grocery-match-modal').classList.add('active');
+        }
+
+        function selectGroceryMatch(id, name) {
+            selectedMatchItem = { id, name };
+            document.getElementById('grocery-match-new-name').value = '';
+            
+            // Update UI to show selection
+            document.querySelectorAll('#grocery-match-results .search-result-item').forEach(el => {
+                el.classList.remove('selected');
+            });
+            event.target.closest('.search-result-item').classList.add('selected');
+        }
+
+        function closeGroceryMatchModal() {
+            document.getElementById('grocery-match-modal').classList.remove('active');
+            pendingGroceryItem = null;
+            selectedMatchItem = null;
+        }
+
+        async function confirmGroceryMatch() {
+            try {
+                if (selectedMatchItem) {
+                    // Use existing item
+                    await moveItem(selectedMatchItem.id, 'grocery_list');
+                    showToast(`${selectedMatchItem.name} added to grocery list`, 'success');
+                } else {
+                    // Create new item
+                    const newName = document.getElementById('grocery-match-new-name').value.trim() || pendingGroceryItem;
+                    const existing = allItems.find(i => i.name.toLowerCase() === newName.toLowerCase());
+                    
+                    if (existing) {
+                        await moveItem(existing.id, 'grocery_list');
+                    } else {
+                        await fetch(`${API_BASE}/items`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: newName, location: 'grocery_list' })
+                        });
+                    }
+                    showToast(`${newName} added to grocery list`, 'success');
+                }
+                
+                closeGroceryMatchModal();
+                loadGrocery();
+                loadAllItems();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        // ========== Spoonacular Functions ==========
+        async function discoverRecipes() {
+            const btn = document.getElementById('discover-btn');
+            const container = document.getElementById('spoon-results');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Searching...';
+            container.innerHTML = '';
+
+            try {
+                const response = await fetch(`${API_BASE}/spoonacular/discover`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ number: 12 })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail);
+                }
+
+                const data = await response.json();
+                
+                // Transform the by-ingredients format to match our render function
+                const results = data.recipes.map(r => ({
+                    id: r.id,
+                    title: r.title,
+                    image: r.image,
+                    ready_in_minutes: null,
+                    servings: null,
+                    used_ingredients: r.usedIngredientCount,
+                    missing_ingredients: r.missedIngredientCount,
+                    used_ingredient_names: r.usedIngredients?.map(i => i.name) || [],
+                    missing_ingredient_names: r.missedIngredients?.map(i => i.name) || []
+                }));
+                
+                renderSpoonResults(results, `Found ${results.length} recipes using: ${data.ingredients_used.join(', ')}`);
+            } catch (err) {
+                container.innerHTML = `<p style="color: var(--accent-red); margin-top: 1rem;">${err.message}</p>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🔍 Find What I Can Cook';
+            }
+        }
+
+        function renderSpoonResults(results, title) {
+            const container = document.getElementById('spoon-results');
+            
+            if (results.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-secondary); margin-top: 1rem;">No recipes found. Try adding more items to your inventory.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="section-divider">${title}</div>
+                <div style="display: grid; gap: 0.75rem;">
+                    ${results.map(r => `
+                        <div class="recipe-card" onclick="viewSpoonRecipe(${r.id})" style="display: flex; gap: 1rem; align-items: flex-start;">
+                            ${r.image ? `<img src="${r.image}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px; flex-shrink: 0;">` : ''}
+                            <div style="flex: 1; min-width: 0;">
+                                <h3 style="font-size: 0.95rem; margin: 0 0 0.25rem 0;">${r.title}</h3>
+                                <div class="recipe-meta" style="margin-bottom: 0.25rem;">
+                                    ${r.used_ingredients !== undefined ? `<span style="color: var(--accent-green);">✓ ${r.used_ingredients} you have</span>` : ''}
+                                    ${r.missing_ingredients !== undefined ? `<span style="color: var(--accent-orange);"> • ${r.missing_ingredients} to buy</span>` : ''}
+                                </div>
+                                ${r.missing_ingredient_names && r.missing_ingredient_names.length > 0 ? `
+                                    <div style="font-size: 0.75rem; color: var(--text-secondary);">
+                                        Need: ${r.missing_ingredient_names.slice(0, 3).join(', ')}${r.missing_ingredient_names.length > 3 ? '...' : ''}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        async function viewSpoonRecipe(recipeId) {
+            document.getElementById('spoon-detail-title').textContent = 'Loading...';
+            document.getElementById('spoon-detail-content').innerHTML = '<div class="loading" style="margin: 2rem auto;"></div>';
+            document.getElementById('spoon-detail-modal').classList.add('active');
+
+            try {
+                const response = await fetch(`${API_BASE}/spoonacular/recipe/${recipeId}`);
+                if (!response.ok) throw new Error('Failed to load recipe');
+                
+                const recipe = await response.json();
+                
+                document.getElementById('spoon-detail-title').textContent = recipe.title;
+                
+                const ingredients = (recipe.extendedIngredients || []).map(i => i.original).join('<br>');
+                const instructions = recipe.instructions || 'No instructions available.';
+                
+                document.getElementById('spoon-detail-content').innerHTML = `
+                    ${recipe.image ? `<img src="${recipe.image}" style="width: 100%; border-radius: 8px; margin-bottom: 1rem;">` : ''}
+                    <div style="display: flex; gap: 1rem; margin-bottom: 1rem; font-size: 0.85rem; color: var(--text-secondary);">
+                        ${recipe.readyInMinutes ? `<span>⏱ ${recipe.readyInMinutes} min</span>` : ''}
+                        ${recipe.servings ? `<span>🍽 ${recipe.servings} servings</span>` : ''}
+                    </div>
+                    ${recipe.summary ? `<p style="font-size: 0.9rem; margin-bottom: 1rem; line-height: 1.5;">${recipe.summary.replace(/<\/?[^>]+(>|$)/g, "").substring(0, 300)}...</p>` : ''}
+                    
+                    <h4 style="margin: 1rem 0 0.5rem; color: var(--accent-blue);">Ingredients</h4>
+                    <div style="font-size: 0.9rem; line-height: 1.6;">${ingredients || 'No ingredients listed.'}</div>
+                    
+                    <div class="location-buttons" style="margin-top: 1.5rem;">
+                        <button class="btn btn-primary btn-block" onclick="importSpoonRecipe(${recipeId})">
+                            Import Recipe
+                        </button>
+                    </div>
+                    
+                    ${recipe.sourceUrl ? `<p style="margin-top: 1rem; font-size: 0.8rem; text-align: center;"><a href="${recipe.sourceUrl}" target="_blank" style="color: var(--accent-blue);">View original recipe →</a></p>` : ''}
+                `;
+                
+                window.currentSpoonRecipe = recipe;
+            } catch (err) {
+                document.getElementById('spoon-detail-content').innerHTML = `<p style="color: var(--accent-red);">${err.message}</p>`;
+            }
+        }
+
+        function closeSpoonDetailModal() {
+            document.getElementById('spoon-detail-modal').classList.remove('active');
+        }
+
+        async function importSpoonRecipe(recipeId) {
+            try {
+                const response = await fetch(`${API_BASE}/spoonacular/import/${recipeId}`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to import');
+                }
+
+                const recipe = await response.json();
+                showToast(`Imported: ${recipe.name}`, 'success');
+                closeSpoonDetailModal();
+                loadRecipes();
+                
+                // Navigate to recipe
+                window.location.href = `/recipe/${recipe.id}`;
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        // ========== Recipe Delete ==========
+        async function deleteRecipe(recipeId, recipeName) {
+            if (!confirm(`Delete "${recipeName}"? This cannot be undone.`)) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/recipes/${recipeId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) throw new Error('Failed to delete recipe');
+
+                showToast('Recipe deleted', 'success');
+                loadRecipes();
+                loadFavorites();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function toggleFavoriteRecipe(recipeId) {
+            try {
+                const response = await fetch(`${API_BASE}/recipes/${recipeId}/favorite`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) throw new Error('Failed to toggle favorite');
+
+                loadRecipes();
+                loadFavorites();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
         }
     </script>
 </body>

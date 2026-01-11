@@ -751,6 +751,90 @@ class TestHealthCheckExtended:
         # Will be False in test environment without API key
         assert data["gemini_configured"] is False
 
+    def test_health_check_includes_spoonacular_status(self, client):
+        """Test that health check includes Spoonacular configuration status."""
+        response = client.get("/api/health")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "spoonacular_configured" in data
+        # Will be False in test environment without API key
+        assert data["spoonacular_configured"] is False
+
+
+class TestRecipeFullUpdate:
+    """Tests for the full recipe update endpoint."""
+
+    def test_update_recipe_with_ingredients(self, client, sample_recipe):
+        """Test updating recipe including ingredients."""
+        response = client.put(
+            f"/api/recipes/{sample_recipe['id']}",
+            json={
+                "name": "Updated Pasta",
+                "ingredients": [
+                    {"name": "Spaghetti", "amount": "500", "unit": "g"},
+                    {"name": "Olive Oil", "amount": "2", "unit": "tbsp"}
+                ]
+            }
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "Updated Pasta"
+        assert len(data["ingredients"]) == 2
+        assert data["ingredients"][0]["name"] == "Spaghetti"
+
+    def test_update_recipe_with_steps(self, client, sample_recipe):
+        """Test updating recipe including steps."""
+        response = client.put(
+            f"/api/recipes/{sample_recipe['id']}",
+            json={
+                "steps": [
+                    {"step_number": 1, "instruction": "Boil water"},
+                    {"step_number": 2, "instruction": "Add pasta"},
+                    {"step_number": 3, "instruction": "Serve"}
+                ]
+            }
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["steps"]) == 3
+
+    def test_update_recipe_not_found(self, client):
+        """Test updating a non-existent recipe."""
+        response = client.put(
+            "/api/recipes/99999",
+            json={"name": "New Name"}
+        )
+        
+        assert response.status_code == 404
+
+
+class TestSpoonacularEndpoints:
+    """Tests for Spoonacular API endpoints (without actual API calls)."""
+
+    def test_spoonacular_recipe_detail_no_api_key(self, client):
+        """Test getting Spoonacular recipe detail when API key is not set."""
+        response = client.get("/api/spoonacular/recipe/12345")
+        
+        assert response.status_code == 503
+
+    def test_spoonacular_discover_no_api_key(self, client, sample_items):
+        """Test discovering recipes by ingredients when API key is not set."""
+        response = client.post(
+            "/api/spoonacular/discover",
+            json={"number": 5}
+        )
+        
+        assert response.status_code == 503
+
+    def test_spoonacular_import_no_api_key(self, client):
+        """Test importing Spoonacular recipe when API key is not set."""
+        response = client.post("/api/spoonacular/import/12345")
+        
+        assert response.status_code == 503
+
 
 class TestAIEndpoints:
     """Tests for AI endpoints (without actual API calls)."""

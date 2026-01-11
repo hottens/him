@@ -211,3 +211,140 @@ def is_configured() -> bool:
     """Check if Gemini API is configured."""
     return GEMINI_API_KEY is not None and len(GEMINI_API_KEY) > 0
 
+
+def parse_spoonacular_recipe(spoonacular_data: dict) -> dict:
+    """
+    Use Gemini to parse a Spoonacular recipe into our clean local format.
+    
+    Args:
+        spoonacular_data: Raw recipe data from Spoonacular API
+    
+    Returns:
+        Dict containing parsed recipe in our format
+    """
+    model = get_model()
+    
+    # Extract key information from Spoonacular data
+    title = spoonacular_data.get("title", "Unknown Recipe")
+    summary = spoonacular_data.get("summary", "")
+    instructions = spoonacular_data.get("instructions", "")
+    extended_ingredients = spoonacular_data.get("extendedIngredients", [])
+    analyzed_instructions = spoonacular_data.get("analyzedInstructions", [])
+    ready_in_minutes = spoonacular_data.get("readyInMinutes", 0)
+    servings = spoonacular_data.get("servings", 4)
+    
+    # Build ingredient text for Gemini
+    ingredients_text = "\n".join([
+        f"- {ing.get('original', ing.get('name', ''))}" 
+        for ing in extended_ingredients
+    ])
+    
+    # Build instructions text
+    if analyzed_instructions:
+        steps_text = "\n".join([
+            f"{step.get('number', i+1)}. {step.get('step', '')}"
+            for instr in analyzed_instructions
+            for i, step in enumerate(instr.get("steps", []))
+        ])
+    else:
+        steps_text = instructions or "No instructions provided."
+    
+    prompt = f"""Parse this recipe into a clean, structured format.
+
+RECIPE: {title}
+
+SUMMARY:
+{summary[:500] if summary else 'No summary available.'}
+
+INGREDIENTS:
+{ingredients_text or 'No ingredients listed.'}
+
+INSTRUCTIONS:
+{steps_text}
+
+COOKING TIME: {ready_in_minutes} minutes total
+SERVINGS: {servings}
+
+Parse this into our structured format. For ingredients:
+- Extract the ingredient name (just the food item, no amounts or preparation)
+- Extract the amount as a string
+- Extract the unit (cups, tbsp, oz, etc.)
+- Add any preparation notes (diced, chopped, etc.)
+
+For steps:
+- Break down into clear, numbered steps
+- Each step should be a single action
+
+IMPORTANT: Respond ONLY with valid JSON in this exact format:
+{{
+  "name": "{title}",
+  "description": "A brief 1-2 sentence description of the dish",
+  "servings": {servings},
+  "prep_time_minutes": null,
+  "cook_time_minutes": {ready_in_minutes or 'null'},
+  "ingredients": [
+    {{"name": "ingredient name only", "amount": "20", "unit": "grams", "notes": "diced"}}
+  ],
+  "steps": [
+    {{"step_number": 1, "instruction": "Clear instruction..."}}
+  ]
+}}
+
+Make the description appetizing but concise. Ensure all ingredients are parsed correctly."""
+
+    try:
+        response = model.generate_content(prompt)
+        response_text = response.text.strip()
+        
+        # Extract JSON from potential markdown wrapping
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0].strip()
+        
+        result = json.loads(response_text)
+        
+        # Add source info
+        result["source_url"] = spoonacular_data.get("sourceUrl")
+        result["image_url"] = spoonacular_data.get("image")
+        result["spoonacular_id"] = spoonacular_data.get("id")
+        
+        return result
+    except json.JSONDecodeError as e:
+        # Fall back to basic parsing if Gemini fails
+        return {
+            "error": f"Gemini parsing failed: {str(e)}",
+            "name": title,
+            "description": summary[:200] if summary else None,
+            "servings": servings,
+            "prep_time_minutes": None,
+            "cook_time_minutes": ready_in_minutes,
+            "ingredients": [
+                {"name": ing.get("name", ""), "amount": str(ing.get("amount", "")), 
+                 "unit": ing.get("unit", ""), "notes": None}
+                for ing in extended_ingredients
+            ],
+            "steps": [
+                {"step_number": i+1, "instruction": step.get("step", "")}
+                for instr in analyzed_instructions
+                for i, step in enumerate(instr.get("steps", []))
+            ] if analyzed_instructions else [{"step_number": 1, "instruction": instructions or "See source for instructions."}],
+            "source_url": spoonacular_data.get("sourceUrl"),
+            "image_url": spoonacular_data.get("image"),
+            "spoonacular_id": spoonacular_data.get("id")
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "name": title,
+            "description": None,
+            "servings": servings,
+            "prep_time_minutes": None,
+            "cook_time_minutes": ready_in_minutes,
+            "ingredients": [],
+            "steps": [],
+            "source_url": spoonacular_data.get("sourceUrl"),
+            "image_url": spoonacular_data.get("image"),
+            "spoonacular_id": spoonacular_data.get("id")
+        }
+

@@ -7,9 +7,11 @@ A minimal, local-first home inventory management system with barcode scanning.
 Track what's in your home and what you need to buy. No cloud, no accounts—just scan barcodes with your phone.
 
 **Core concept:**
-- Items are either in **Inventory** (at home) or on the **Grocery List** (need to buy)
+- Items are either in **Inventory** (at home), on the **Grocery List** (need to buy), or **Archived** (neither)
 - Scan a barcode to instantly move items between lists
 - New barcodes prompt you to name the item
+- AI-powered recipe suggestions based on your inventory (Gemini)
+- Browse millions of recipes online (Spoonacular)
 
 ## Quick Start
 
@@ -63,7 +65,28 @@ uvicorn app.main:app --host 0.0.0.0 --port 4269
 From the Inventory or Grocery tabs:
 - Tap 🛒 to move an item to the grocery list
 - Tap 🏠 to move an item to inventory
-- Tap ✕ to remove from both lists (item stays in database for future scans)
+- Tap 📦 to archive (remove from both lists, item stays in database)
+- Tap ✏️ to edit item name or delete it entirely
+- Click on item name to open edit modal
+
+### Recipe Features
+
+**AI Recipe Suggestions (Gemini):**
+1. Go to Inventory tab
+2. Click "Suggest Recipes" to get AI-generated recipes based on what you have
+3. Optionally enter a query like "soup" or "quick meal" for guided suggestions
+4. Save recipes to your collection
+
+**Discover Recipes (Spoonacular):**
+1. Go to Browse tab
+2. Click "Find What I Can Cook" to discover recipes using your inventory
+3. View recipes sorted by how many ingredients you already have
+4. Import recipes - Gemini AI parses them into clean, structured format
+
+**Favorites:**
+- Star recipes to mark as favorites
+- View favorites in the Favorites tab with ingredient availability status
+- See which recipes you can make with current inventory
 
 ## API Reference
 
@@ -124,6 +147,38 @@ These return clean, stable JSON for REST sensors:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/search?q=milk` | Search items by name |
+
+### Recipes
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/recipes` | List all recipes |
+| `GET` | `/api/recipes?favorites_only=true` | List favorite recipes |
+| `POST` | `/api/recipes` | Create new recipe |
+| `GET` | `/api/recipes/{id}` | Get single recipe |
+| `PATCH` | `/api/recipes/{id}` | Update recipe metadata |
+| `PUT` | `/api/recipes/{id}` | Full update with ingredients/steps |
+| `DELETE` | `/api/recipes/{id}` | Delete recipe |
+| `POST` | `/api/recipes/{id}/favorite` | Toggle favorite status |
+
+### AI Suggestions (Gemini)
+
+Requires `GEMINI_API_KEY` environment variable.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/ai/recipe-suggestions` | Get AI recipe suggestions |
+| `POST` | `/api/ai/grocery-suggestions` | Get AI grocery suggestions |
+
+### Recipe Discovery (Spoonacular + Gemini)
+
+Requires `SPOONACULAR_API_KEY` environment variable. Uses Gemini for parsing if configured.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/spoonacular/discover` | Find recipes by inventory |
+| `GET` | `/api/spoonacular/recipe/{id}` | Get recipe details |
+| `POST` | `/api/spoonacular/import/{id}` | Import recipe (Gemini parses) |
 
 ## Home Assistant Integration
 
@@ -213,6 +268,20 @@ content: |
   _List is empty_
   {% endif %}
 ```
+
+## Environment Variables
+
+Configure these in a `.env` file or pass to Docker:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GEMINI_API_KEY` | No | Google Gemini API key for AI recipe/grocery suggestions |
+| `SPOONACULAR_API_KEY` | No | Spoonacular API key for recipe browsing |
+| `DATABASE_PATH` | No | Path to SQLite database (default: `/data/inventory.db`) |
+
+**Getting API Keys:**
+- **Gemini:** Visit [Google AI Studio](https://makersuite.google.com/app/apikey)
+- **Spoonacular:** Register at [Spoonacular](https://spoonacular.com/food-api)
 
 ## Data Storage
 

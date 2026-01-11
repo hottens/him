@@ -16,6 +16,7 @@ from .database import engine, get_db, Base
 from .models import Item, Barcode, ItemLocation, Recipe, RecipeIngredient, RecipeStep
 from . import schemas
 from . import gemini_service
+from . import spoonacular_service
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -46,7 +47,8 @@ async def health_check():
     """Health check endpoint for container orchestration."""
     return {
         "status": "healthy",
-        "gemini_configured": gemini_service.is_configured()
+        "gemini_configured": gemini_service.is_configured(),
+        "spoonacular_configured": spoonacular_service.is_configured()
     }
 
 
@@ -382,6 +384,58 @@ async def update_recipe(
     return recipe
 
 
+@app.put("/api/recipes/{recipe_id}", response_model=schemas.RecipeResponse)
+async def update_recipe_full(
+    recipe_id: int,
+    update: schemas.RecipeFullUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update a recipe including ingredients and steps."""
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    
+    # Update basic fields
+    update_data = update.model_dump(exclude_unset=True)
+    
+    for field in ['name', 'description', 'servings', 'prep_time_minutes', 'cook_time_minutes', 'is_favorite']:
+        if field in update_data and update_data[field] is not None:
+            setattr(recipe, field, update_data[field])
+    
+    # Update ingredients if provided
+    if update.ingredients is not None:
+        # Delete existing ingredients
+        db.query(RecipeIngredient).filter(RecipeIngredient.recipe_id == recipe_id).delete()
+        # Add new ingredients
+        for ing in update.ingredients:
+            db_ingredient = RecipeIngredient(
+                recipe_id=recipe_id,
+                name=ing.name,
+                amount=ing.amount,
+                unit=ing.unit,
+                notes=ing.notes
+            )
+            db.add(db_ingredient)
+    
+    # Update steps if provided
+    if update.steps is not None:
+        # Delete existing steps
+        db.query(RecipeStep).filter(RecipeStep.recipe_id == recipe_id).delete()
+        # Add new steps
+        for step in update.steps:
+            db_step = RecipeStep(
+                recipe_id=recipe_id,
+                step_number=step.step_number,
+                instruction=step.instruction
+            )
+            db.add(db_step)
+    
+    db.commit()
+    db.refresh(recipe)
+    
+    return recipe
+
+
 @app.delete("/api/recipes/{recipe_id}")
 async def delete_recipe(recipe_id: int, db: Session = Depends(get_db)):
     """Delete a recipe."""
@@ -498,6 +552,134 @@ async def get_grocery_suggestions(
         raise HTTPException(status_code=500, detail=result["error"])
     
     return result
+
+
+# --- Spoonacular API Endpoints ---
+# Uses search_by_ingredients as the primary discovery method
+
+@app.get("/api/spoonacular/recipe/{recipe_id}")
+async def spoonacular_get_recipe(recipe_id: int):
+    """
+    Get detailed recipe information from Spoonacular.
+    
+    Requires SPOONACULAR_API_KEY environment variable to be set.
+    """
+    if not spoonacular_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Spoonacular API is not configured. Set SPOONACULAR_API_KEY environment variable."
+        )
+    
+    result = spoonacular_service.get_recipe_details(recipe_id)
+    
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+    
+    return result
+
+
+@app.post("/api/spoonacular/discover")
+async def spoonacular_discover_recipes(
+    request: schemas.SpoonacularByIngredientsRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Discover recipes based on current inventory ingredients.
+    
+    This is the primary way to find recipes - based on what you have.
+    Requires SPOONACULAR_API_KEY environment variable to be set.
+    """
+    if not spoonacular_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Spoonacular API is not configured. Set SPOONACULAR_API_KEY environment variable."
+        )
+    
+    # Get inventory items
+    inventory_items = db.query(Item).filter(
+        Item.location == ItemLocation.INVENTORY
+    ).all()
+    ingredient_names = [item.name for item in inventory_items]
+    
+    if not ingredient_names:
+        raise HTTPException(
+            status_code=400,
+            detail="No items in inventory. Add some items first."
+        )
+    
+    result = spoonacular_service.search_by_ingredients(
+        ingredients=ingredient_names,
+        number=request.number
+    )
+    
+    return {
+        "recipes": result,
+        "ingredients_used": ingredient_names
+    }
+
+
+@app.post("/api/spoonacular/import/{recipe_id}", response_model=schemas.RecipeResponse)
+async def import_spoonacular_recipe(recipe_id: int, db: Session = Depends(get_db)):
+    """
+    Import a Spoonacular recipe into the local database.
+    
+    Fetches recipe details from Spoonacular, uses Gemini to parse it
+    into our clean format, then saves locally.
+    """
+    if not spoonacular_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Spoonacular API is not configured. Set SPOONACULAR_API_KEY environment variable."
+        )
+    
+    # Get recipe details from Spoonacular
+    spoon_recipe = spoonacular_service.get_recipe_details(recipe_id)
+    
+    if "error" in spoon_recipe:
+        raise HTTPException(status_code=500, detail=spoon_recipe["error"])
+    
+    # Use Gemini to parse if configured, otherwise fall back to basic parsing
+    if gemini_service.is_configured():
+        local_data = gemini_service.parse_spoonacular_recipe(spoon_recipe)
+    else:
+        local_data = spoonacular_service.convert_to_local_recipe(spoon_recipe)
+    
+    # Create the recipe
+    db_recipe = Recipe(
+        name=local_data["name"],
+        description=local_data.get("description"),
+        servings=local_data.get("servings", 4),
+        prep_time_minutes=local_data.get("prep_time_minutes"),
+        cook_time_minutes=local_data.get("cook_time_minutes"),
+        is_favorite=False
+    )
+    db.add(db_recipe)
+    db.flush()
+    
+    # Add ingredients
+    for ing in local_data.get("ingredients", []):
+        db_ingredient = RecipeIngredient(
+            recipe_id=db_recipe.id,
+            name=ing["name"],
+            amount=ing.get("amount"),
+            unit=ing.get("unit"),
+            notes=ing.get("notes")
+        )
+        db.add(db_ingredient)
+    
+    # Add steps
+    for step in local_data.get("steps", []):
+        db_step = RecipeStep(
+            recipe_id=db_recipe.id,
+            step_number=step["step_number"],
+            instruction=step["instruction"]
+        )
+        db.add(db_step)
+    
+    db.commit()
+    db.refresh(db_recipe)
+    
+    return db_recipe
 
 
 # --- Beautiful Recipe View Page ---
