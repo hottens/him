@@ -166,7 +166,7 @@ Requires `GEMINI_API_KEY` environment variable.
 
 *Note: Gemini is also used internally for translating ingredients to English before Spoonacular searches, and for parsing imported recipes.*
 
-### Recipe Discovery (Spoonacular + Gemini)
+### Recipe Discovery & Import (Spoonacular + Gemini)
 
 Requires `SPOONACULAR_API_KEY` environment variable. Uses Gemini for parsing if configured.
 
@@ -175,6 +175,7 @@ Requires `SPOONACULAR_API_KEY` environment variable. Uses Gemini for parsing if 
 | `POST` | `/api/spoonacular/discover` | Find recipes by inventory |
 | `GET` | `/api/spoonacular/recipe/{id}` | Get recipe details |
 | `POST` | `/api/spoonacular/import/{id}` | Import recipe (Gemini parses) |
+| `POST` | `/api/recipes/import-url` | Import recipe from any URL |
 
 ## Home Assistant Integration
 

@@ -690,6 +690,78 @@ async def import_spoonacular_recipe(recipe_id: int, db: Session = Depends(get_db
     return db_recipe
 
 
+class ImportUrlRequest(schemas.BaseModel):
+    """Request to import a recipe from a URL."""
+    url: str
+
+
+@app.post("/api/recipes/import-url", response_model=schemas.RecipeResponse)
+async def import_recipe_from_url(request: ImportUrlRequest, db: Session = Depends(get_db)):
+    """
+    Import a recipe from any website URL.
+    
+    Uses Spoonacular to extract recipe data from the URL,
+    then uses Gemini to parse it into our clean format.
+    """
+    if not spoonacular_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Spoonacular API is not configured. Set SPOONACULAR_API_KEY environment variable."
+        )
+    
+    # Extract recipe from URL using Spoonacular
+    extracted = spoonacular_service.extract_recipe_from_url(request.url)
+    
+    if "error" in extracted:
+        raise HTTPException(status_code=500, detail=f"Failed to extract recipe: {extracted['error']}")
+    
+    if not extracted.get("title"):
+        raise HTTPException(status_code=400, detail="Could not extract recipe from this URL")
+    
+    # Use Gemini to parse if configured, otherwise fall back to basic parsing
+    if gemini_service.is_configured():
+        local_data = gemini_service.parse_spoonacular_recipe(extracted)
+    else:
+        local_data = spoonacular_service.convert_to_local_recipe(extracted)
+    
+    # Create the recipe
+    db_recipe = Recipe(
+        name=local_data["name"],
+        description=local_data.get("description"),
+        servings=local_data.get("servings", 4),
+        prep_time_minutes=local_data.get("prep_time_minutes"),
+        cook_time_minutes=local_data.get("cook_time_minutes"),
+        is_favorite=False
+    )
+    db.add(db_recipe)
+    db.flush()
+    
+    # Add ingredients
+    for ing in local_data.get("ingredients", []):
+        db_ingredient = RecipeIngredient(
+            recipe_id=db_recipe.id,
+            name=ing.get("name", ""),
+            amount=ing.get("amount"),
+            unit=ing.get("unit"),
+            notes=ing.get("notes")
+        )
+        db.add(db_ingredient)
+    
+    # Add steps
+    for step in local_data.get("steps", []):
+        db_step = RecipeStep(
+            recipe_id=db_recipe.id,
+            step_number=step.get("step_number", 1),
+            instruction=step.get("instruction", "")
+        )
+        db.add(db_step)
+    
+    db.commit()
+    db.refresh(db_recipe)
+    
+    return db_recipe
+
+
 # --- Beautiful Recipe View Page ---
 
 @app.get("/recipe/{recipe_id}", response_class=HTMLResponse, include_in_schema=False)

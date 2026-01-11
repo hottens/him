@@ -835,6 +835,15 @@ class TestSpoonacularEndpoints:
         
         assert response.status_code == 503
 
+    def test_import_url_no_api_key(self, client):
+        """Test importing recipe from URL when API key is not set."""
+        response = client.post(
+            "/api/recipes/import-url",
+            json={"url": "https://example.com/recipe"}
+        )
+        
+        assert response.status_code == 503
+
 
 class TestAIEndpoints:
     """Tests for AI endpoints (without actual API calls)."""

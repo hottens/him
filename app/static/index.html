@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Home Inventory</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     
     <!-- html5-qrcode library for barcode scanning -->
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -104,6 +105,55 @@
         .tab.active .count {
             background: var(--accent-blue);
             color: var(--bg-primary);
+        }
+
+        /* Sub-tabs */
+        .sub-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            background: var(--bg-secondary);
+            padding: 0.5rem;
+            border-radius: 10px;
+        }
+
+        .sub-tab {
+            flex: 1;
+            padding: 0.5rem 0.75rem;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .sub-tab:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .sub-tab.active {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .sub-tab .count {
+            background: var(--bg-primary);
+            padding: 0.1rem 0.4rem;
+            border-radius: 8px;
+            font-size: 0.7rem;
+            margin-left: 0.25rem;
+        }
+
+        .sub-panel {
+            display: none;
+        }
+
+        .sub-panel.active {
+            display: block;
         }
 
         /* Main Content */
@@ -688,11 +738,8 @@
 
     <nav class="tabs">
         <button class="tab active" data-panel="scanner">📷 Scan</button>
-        <button class="tab" data-panel="inventory">🏠 Inventory<span class="count" id="inventory-count">0</span></button>
-        <button class="tab" data-panel="grocery">🛒 Grocery<span class="count" id="grocery-count">0</span></button>
-        <button class="tab" data-panel="favorites">⭐ Favorites<span class="count" id="favorites-count">0</span></button>
-        <button class="tab" data-panel="recipes">📖 Recipes</button>
-        <button class="tab" data-panel="browse">🔍 Browse</button>
+        <button class="tab" data-panel="items">📦 Items<span class="count" id="items-count">0</span></button>
+        <button class="tab" data-panel="recipes">🍳 Recipes<span class="count" id="recipes-count">0</span></button>
     </nav>
 
     <main>
@@ -725,7 +772,6 @@
             <div class="section-divider">or add manually</div>
 
             <div class="manual-add-section">
-                <h3>➕ Quick Add</h3>
                 <div class="form-group">
                     <input type="text" class="form-input" id="manual-item-input" 
                            placeholder="Type item name..." list="items-datalist">
@@ -734,78 +780,93 @@
                 <div class="location-buttons">
                     <button class="btn btn-success" onclick="manualAddItem('inventory')">🏠 Inventory</button>
                     <button class="btn btn-warning" onclick="manualAddItem('grocery_list')">🛒 Grocery</button>
-                    <button class="btn" onclick="manualAddItem('neither')">📦 Archive</button>
                 </div>
             </div>
         </div>
 
-        <!-- Inventory Panel -->
-        <div id="inventory" class="panel">
-            <div class="manual-add-section">
-                <div class="manual-add-row">
-                    <input type="text" class="form-input" id="inventory-add-input" 
-                           placeholder="Add item to inventory..." list="items-datalist">
-                    <button class="btn btn-success" onclick="quickAddToInventory()">Add</button>
+        <!-- Items Panel (Inventory + Grocery) -->
+        <div id="items" class="panel">
+            <!-- Sub-tabs for Inventory/Grocery -->
+            <div class="sub-tabs">
+                <button class="sub-tab active" data-subtab="grocery-section">🛒 Grocery<span class="count" id="grocery-count">0</span></button>
+                <button class="sub-tab" data-subtab="inventory-section">🏠 Inventory<span class="count" id="inventory-count">0</span></button>
+            </div>
+
+            <!-- Grocery Section -->
+            <div id="grocery-section" class="sub-panel active">
+                <div class="manual-add-section">
+                    <div class="manual-add-row">
+                        <input type="text" class="form-input" id="grocery-add-input" 
+                               placeholder="Add to grocery list..." list="items-datalist">
+                        <button class="btn btn-warning" onclick="quickAddToGrocery()">Add</button>
+                    </div>
                 </div>
-            </div>
-            
-            <div class="section-divider">Items in Stock</div>
-            <div id="inventory-list" class="item-list"></div>
-        </div>
-
-        <!-- Grocery Panel -->
-        <div id="grocery" class="panel">
-            <div class="manual-add-section">
-                <div class="manual-add-row">
-                    <input type="text" class="form-input" id="grocery-add-input" 
-                           placeholder="Add item to grocery list..." list="items-datalist">
-                    <button class="btn btn-warning" onclick="quickAddToGrocery()">Add</button>
+                
+                <div class="ai-section" id="grocery-ai-section">
+                    <h3>✨ Smart Suggestions</h3>
+                    <button class="btn btn-purple btn-block" onclick="getGrocerySuggestions()" id="grocery-suggest-btn">
+                        Suggest Items
+                    </button>
+                    <div id="grocery-suggestions"></div>
                 </div>
+                
+                <div id="grocery-list" class="item-list"></div>
             </div>
-            
-            <div class="ai-section" id="grocery-ai-section">
-                <h3>✨ AI Suggestions</h3>
-                <button class="btn btn-purple btn-block" onclick="getGrocerySuggestions()" id="grocery-suggest-btn">
-                    Get Smart Suggestions
-                </button>
-                <div id="grocery-suggestions"></div>
+
+            <!-- Inventory Section -->
+            <div id="inventory-section" class="sub-panel">
+                <div class="manual-add-section">
+                    <div class="manual-add-row">
+                        <input type="text" class="form-input" id="inventory-add-input" 
+                               placeholder="Add to inventory..." list="items-datalist">
+                        <button class="btn btn-success" onclick="quickAddToInventory()">Add</button>
+                    </div>
+                </div>
+                
+                <div id="inventory-list" class="item-list"></div>
             </div>
-            
-            <div id="grocery-list" class="item-list"></div>
         </div>
 
-        <!-- Favorites Panel -->
-        <div id="favorites" class="panel">
-            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
-                Your favorite recipes with ingredient availability
-            </p>
-            <div id="favorites-list"></div>
-        </div>
-
-        <!-- Recipes Panel -->
+        <!-- Recipes Panel (Saved + Favorites + Discover) -->
         <div id="recipes" class="panel">
-            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
-                Your saved recipes. Use the Browse tab to discover new recipes.
-            </p>
-            <div id="recipe-list"></div>
-        </div>
-
-        <!-- Browse (Spoonacular) Panel -->
-        <div id="browse" class="panel">
-            <div class="ai-section" style="border-color: var(--accent-green);">
-                <h3 style="color: var(--accent-green);">🍳 Discover Recipes</h3>
-                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
-                    Find recipes from the web based on your current inventory
-                </p>
-                <button class="btn btn-success btn-block" onclick="discoverRecipes()" id="discover-btn">
-                    🔍 Find What I Can Cook
-                </button>
-                <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.5rem; text-align: center;">
-                    Searches millions of recipes using Spoonacular API
-                </p>
+            <!-- Sub-tabs for recipes -->
+            <div class="sub-tabs">
+                <button class="sub-tab active" data-subtab="favorites-section">⭐ Favorites<span class="count" id="favorites-count">0</span></button>
+                <button class="sub-tab" data-subtab="all-recipes-section">📖 All</button>
+                <button class="sub-tab" data-subtab="discover-section">🔍 Discover</button>
             </div>
 
-            <div id="spoon-results"></div>
+            <!-- Favorites Section -->
+            <div id="favorites-section" class="sub-panel active">
+                <div id="favorites-list"></div>
+            </div>
+
+            <!-- All Recipes Section -->
+            <div id="all-recipes-section" class="sub-panel">
+                <div class="manual-add-section">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.75rem; color: var(--text-secondary);">📎 Import from URL</h3>
+                    <div class="manual-add-row">
+                        <input type="text" class="form-input" id="recipe-url-input" 
+                               placeholder="Paste recipe URL...">
+                        <button class="btn btn-primary" onclick="importRecipeFromUrl()" id="import-url-btn">Import</button>
+                    </div>
+                </div>
+                <div id="recipe-list"></div>
+            </div>
+
+            <!-- Discover Section -->
+            <div id="discover-section" class="sub-panel">
+                <div class="ai-section" style="border-color: var(--accent-green);">
+                    <h3 style="color: var(--accent-green);">🍳 Find Recipes</h3>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                        Discover recipes based on your inventory
+                    </p>
+                    <button class="btn btn-success btn-block" onclick="discoverRecipes()" id="discover-btn">
+                        🔍 Find What I Can Cook
+                    </button>
+                </div>
+                <div id="spoon-results"></div>
+            </div>
         </div>
     </main>
 
@@ -923,6 +984,11 @@
                 tab.addEventListener('click', () => switchPanel(tab.dataset.panel));
             });
 
+            // Set up sub-tab navigation
+            document.querySelectorAll('.sub-tab').forEach(tab => {
+                tab.addEventListener('click', () => switchSubPanel(tab));
+            });
+
             // Set up item name search in modal
             const itemNameInput = document.getElementById('modal-item-name');
             let searchTimeout;
@@ -941,6 +1007,9 @@
             });
             document.getElementById('grocery-add-input').addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') quickAddToGrocery();
+            });
+            document.getElementById('recipe-url-input').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') importRecipeFromUrl();
             });
 
             // Load initial data
@@ -963,6 +1032,32 @@
             if (panelId !== 'scanner' && isScanning) {
                 stopScanner();
             }
+        }
+
+        // Sub-panel Navigation
+        function switchSubPanel(tabElement) {
+            const container = tabElement.closest('.panel');
+            const subtabId = tabElement.dataset.subtab;
+            
+            // Update sub-tab styles
+            container.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+            tabElement.classList.add('active');
+            
+            // Show/hide sub-panels
+            container.querySelectorAll('.sub-panel').forEach(p => p.classList.remove('active'));
+            document.getElementById(subtabId).classList.add('active');
+        }
+
+        // Update combined counts
+        function updateItemsCount() {
+            const inventory = parseInt(document.getElementById('inventory-count').textContent) || 0;
+            const grocery = parseInt(document.getElementById('grocery-count').textContent) || 0;
+            document.getElementById('items-count').textContent = inventory + grocery;
+        }
+
+        function updateRecipesCount() {
+            const favorites = parseInt(document.getElementById('favorites-count').textContent) || 0;
+            document.getElementById('recipes-count').textContent = favorites;
         }
 
         // Scan Mode
@@ -1321,6 +1416,7 @@
                 const data = await response.json();
                 
                 document.getElementById('inventory-count').textContent = data.count;
+                updateItemsCount();
                 
                 const listDiv = document.getElementById('inventory-list');
                 if (data.items.length === 0) {
@@ -1344,6 +1440,7 @@
                 const data = await response.json();
                 
                 document.getElementById('grocery-count').textContent = data.count;
+                updateItemsCount();
                 
                 const listDiv = document.getElementById('grocery-list');
                 if (data.items.length === 0) {
@@ -1389,6 +1486,8 @@
                 const response = await fetch(`${API_BASE}/recipes`);
                 const data = await response.json();
                 
+                updateRecipesCount();
+                
                 const listDiv = document.getElementById('recipe-list');
                 if (data.recipes.length === 0) {
                     listDiv.innerHTML = `
@@ -1396,7 +1495,7 @@
                             <div class="empty-state-icon">📖</div>
                             <p>No saved recipes yet</p>
                             <p style="font-size: 0.85rem; margin-top: 0.5rem;">
-                                Use the Browse tab to discover and import recipes!
+                                Use Discover to find and import recipes!
                             </p>
                         </div>
                     `;
@@ -1446,6 +1545,7 @@
                 );
                 
                 document.getElementById('favorites-count').textContent = recipesData.count;
+                updateRecipesCount();
                 
                 const listDiv = document.getElementById('favorites-list');
                 if (recipesData.recipes.length === 0) {
@@ -1928,6 +2028,54 @@
                 loadFavorites();
             } catch (err) {
                 showToast(err.message, 'error');
+            }
+        }
+
+        // ========== Import Recipe from URL ==========
+        async function importRecipeFromUrl() {
+            const input = document.getElementById('recipe-url-input');
+            const btn = document.getElementById('import-url-btn');
+            const url = input.value.trim();
+
+            if (!url) {
+                showToast('Please enter a recipe URL', 'error');
+                return;
+            }
+
+            // Basic URL validation
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                showToast('Please enter a valid URL', 'error');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span>';
+
+            try {
+                const response = await fetch(`${API_BASE}/recipes/import-url`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to import recipe');
+                }
+
+                const recipe = await response.json();
+                showToast(`Imported: ${recipe.name}`, 'success');
+                input.value = '';
+                loadRecipes();
+                loadFavorites();
+                
+                // Navigate to the recipe
+                window.location.href = `/recipe/${recipe.id}`;
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Import';
             }
         }
     </script>

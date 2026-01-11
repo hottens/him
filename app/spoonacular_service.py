@@ -169,6 +169,36 @@ def search_by_ingredients(
         return []
 
 
+def extract_recipe_from_url(url: str) -> dict:
+    """
+    Extract recipe data from a website URL using Spoonacular.
+    
+    Args:
+        url: URL of the recipe page to extract
+    
+    Returns:
+        Dict containing extracted recipe data
+    """
+    if not is_configured():
+        raise ValueError("SPOONACULAR_API_KEY environment variable is not set")
+    
+    try:
+        response = requests.get(
+            f"{BASE_URL}/recipes/extract",
+            params={
+                "apiKey": SPOONACULAR_API_KEY,
+                "url": url,
+                "forceExtraction": True,
+                "analyze": True
+            },
+            timeout=30  # URL extraction can take longer
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        return {"error": str(e)}
+
+
 def convert_to_local_recipe(spoonacular_recipe: dict) -> dict:
     """
     Convert a Spoonacular recipe to our local recipe format.
