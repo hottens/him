@@ -84,6 +84,7 @@ class Recipe(Base):
 class RecipeIngredient(Base):
     """
     An ingredient in a recipe with amount and unit.
+    Can optionally be linked to an Item for inventory matching.
     """
     __tablename__ = "recipe_ingredients"
 
@@ -93,11 +94,14 @@ class RecipeIngredient(Base):
     amount = Column(String, nullable=True)  # e.g., "2", "1/2"
     unit = Column(String, nullable=True)    # e.g., "cups", "tbsp", "pieces"
     notes = Column(String, nullable=True)   # e.g., "diced", "room temperature"
+    # Optional link to inventory item for matching
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
 
     recipe = relationship("Recipe", back_populates="ingredients")
+    matched_item = relationship("Item", foreign_keys=[item_id])
 
     def __repr__(self):
-        return f"<RecipeIngredient(id={self.id}, name='{self.name}')>"
+        return f"<RecipeIngredient(id={self.id}, name='{self.name}', item_id={self.item_id})>"
 
 
 class RecipeStep(Base):

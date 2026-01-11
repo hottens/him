@@ -49,6 +49,12 @@ class ItemUpdate(BaseModel):
     location: Optional[ItemLocation] = None
 
 
+class ItemMergeRequest(BaseModel):
+    """Request to merge multiple items into one."""
+    target_id: int  # The item to keep
+    source_ids: list[int]  # Items to merge into target (will be deleted)
+
+
 # --- Barcode Lookup Response ---
 
 class BarcodeLookupResponse(BaseModel):
@@ -94,15 +100,27 @@ class RecipeIngredientBase(BaseModel):
     amount: Optional[str] = None
     unit: Optional[str] = None
     notes: Optional[str] = None
+    item_id: Optional[int] = None  # Optional link to inventory item
 
 
 class RecipeIngredientCreate(RecipeIngredientBase):
     pass
 
 
+class MatchedItemInfo(BaseModel):
+    """Minimal item info for ingredient matching."""
+    id: int
+    name: str
+    location: ItemLocation
+
+    class Config:
+        from_attributes = True
+
+
 class RecipeIngredientResponse(RecipeIngredientBase):
     id: int
     recipe_id: int
+    matched_item: Optional[MatchedItemInfo] = None
 
     class Config:
         from_attributes = True

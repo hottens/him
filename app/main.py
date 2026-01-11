@@ -214,6 +214,61 @@ async def delete_item(item_id: int, db: Session = Depends(get_db)):
     return {"deleted": True, "id": item_id}
 
 
+@app.post("/api/items/merge", response_model=schemas.ItemResponse)
+async def merge_items(
+    request: schemas.ItemMergeRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Merge multiple items into one.
+    
+    - Transfers all barcodes from source items to target item
+    - Updates all recipe ingredient links to point to target item
+    - Deletes the source items
+    """
+    # Validate target exists
+    target = db.query(Item).filter(Item.id == request.target_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target item not found")
+    
+    # Validate source items exist
+    for source_id in request.source_ids:
+        if source_id == request.target_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Target item cannot be in source items"
+            )
+        source = db.query(Item).filter(Item.id == source_id).first()
+        if not source:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Source item with id {source_id} not found"
+            )
+    
+    # Transfer barcodes from source items to target
+    for source_id in request.source_ids:
+        db.query(Barcode).filter(Barcode.item_id == source_id).update(
+            {"item_id": request.target_id}
+        )
+    
+    # Update recipe ingredient links
+    for source_id in request.source_ids:
+        db.query(RecipeIngredient).filter(
+            RecipeIngredient.item_id == source_id
+        ).update({"item_id": request.target_id})
+    
+    # Delete source items
+    for source_id in request.source_ids:
+        source = db.query(Item).filter(Item.id == source_id).first()
+        if source:
+            db.delete(source)
+    
+    db.commit()
+    db.refresh(target)
+    
+    return target
+
+
 # --- Move Item Shortcuts ---
 
 @app.post("/api/items/{item_id}/to-inventory", response_model=schemas.ItemResponse)
@@ -336,7 +391,8 @@ async def create_recipe(recipe: schemas.RecipeCreate, db: Session = Depends(get_
             name=ing.name,
             amount=ing.amount,
             unit=ing.unit,
-            notes=ing.notes
+            notes=ing.notes,
+            item_id=ing.item_id  # Optional link to inventory item
         )
         db.add(db_ingredient)
     
@@ -413,7 +469,8 @@ async def update_recipe_full(
                 name=ing.name,
                 amount=ing.amount,
                 unit=ing.unit,
-                notes=ing.notes
+                notes=ing.notes,
+                item_id=ing.item_id  # Optional link to inventory item
             )
             db.add(db_ingredient)
     
@@ -771,29 +828,60 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
     
-    # Get inventory items for ingredient availability check
+    # Get all items for dropdown (including location info)
+    all_items = db.query(Item).order_by(Item.name).all()
+    # Get inventory items for fallback name-based matching
     inventory_items = db.query(Item).filter(Item.location == ItemLocation.INVENTORY).all()
-    inventory_names = {item.name.lower() for item in inventory_items}
+    inventory_names = {item.name.lower(): item for item in inventory_items}
     
     # Sort steps by step_number
     sorted_steps = sorted(recipe.steps, key=lambda s: s.step_number)
     
     # Generate ingredients HTML with availability status
+    # Prioritize matched_item for availability, fallback to name matching
     ingredients_html = ""
     missing_ingredients = []
+    ingredient_data = []  # For JS
     for ing in recipe.ingredients:
         amount_str = f"{ing.amount} " if ing.amount else ""
         unit_str = f"{ing.unit} " if ing.unit else ""
         notes_str = f" <span class='notes'>({ing.notes})</span>" if ing.notes else ""
         
-        is_available = ing.name.lower() in inventory_names
+        # Determine availability: prioritize matched_item, fallback to name match
+        matched_item_name = None
+        if ing.matched_item:
+            is_available = ing.matched_item.location == ItemLocation.INVENTORY
+            matched_item_name = ing.matched_item.name
+        elif ing.name.lower() in inventory_names:
+            is_available = True
+        else:
+            is_available = False
+        
         status_icon = "✓" if is_available else "✗"
         status_class = "available" if is_available else "missing"
         
         if not is_available:
-            missing_ingredients.append(ing.name)
+            missing_ingredients.append({
+                "name": ing.name,
+                "item_id": ing.item_id
+            })
         
-        ingredients_html += f"<li class='{status_class}'><span class='status-icon'>{status_icon}</span> {amount_str}{unit_str}{ing.name}{notes_str}</li>"
+        # Store ingredient data for JS edit modal
+        ingredient_data.append({
+            "id": ing.id,
+            "name": ing.name,
+            "amount": ing.amount or "",
+            "unit": ing.unit or "",
+            "notes": ing.notes or "",
+            "item_id": ing.item_id
+        })
+        
+        # Show matched item name if different from ingredient name
+        match_info = ""
+        if matched_item_name and matched_item_name.lower() != ing.name.lower():
+            match_info = f" <span class='matched-to'>→ {matched_item_name}</span>"
+        
+        ingredients_html += f"<li class='{status_class}' data-ing-id='{ing.id}'><span class='status-icon'>{status_icon}</span> {amount_str}{unit_str}{ing.name}{notes_str}{match_info}</li>"
     
     # Generate steps HTML
     steps_html = ""
@@ -804,9 +892,14 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     total_time = (recipe.prep_time_minutes or 0) + (recipe.cook_time_minutes or 0)
     time_str = f"{total_time} min" if total_time else "—"
     
-    # Missing ingredients JSON for JavaScript
+    # JSON data for JavaScript
     import json
     missing_json = json.dumps(missing_ingredients)
+    ingredients_json = json.dumps(ingredient_data)
+    items_json = json.dumps([
+        {"id": item.id, "name": item.name, "location": item.location.value}
+        for item in all_items
+    ])
     
     # Availability summary
     total_ingredients = len(recipe.ingredients)
@@ -985,6 +1078,141 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         .ingredients li.missing .status-icon {{ color: var(--accent-red); }}
         .ingredients li.missing {{ opacity: 0.7; }}
         
+        .matched-to {{
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            font-style: italic;
+        }}
+        
+        .ingredients-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }}
+        
+        .edit-btn {{
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        
+        .edit-btn:hover {{
+            border-color: var(--accent);
+            color: var(--accent);
+        }}
+        
+        .modal-overlay {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 1rem;
+        }}
+        
+        .modal-overlay.active {{ display: flex; }}
+        
+        .modal {{
+            background: var(--bg);
+            border-radius: 12px;
+            max-width: 500px;
+            width: 100%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }}
+        
+        .modal-header {{
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        
+        .modal-header h3 {{
+            font-family: 'Crimson Pro', serif;
+            font-size: 1.3rem;
+            margin: 0;
+        }}
+        
+        .modal-close {{
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--text-muted);
+        }}
+        
+        .modal-body {{
+            padding: 1.5rem;
+        }}
+        
+        .match-item {{
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border);
+        }}
+        
+        .match-item:last-child {{ border-bottom: none; }}
+        
+        .match-item-name {{
+            font-weight: 500;
+            margin-bottom: 0.4rem;
+        }}
+        
+        .match-item select {{
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.9rem;
+            background: #fff;
+        }}
+        
+        .modal-footer {{
+            padding: 1rem 1.5rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+        }}
+        
+        .modal-footer button {{
+            padding: 0.6rem 1.2rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        
+        .btn-cancel {{
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+        }}
+        
+        .btn-save {{
+            background: var(--accent);
+            border: none;
+            color: #fff;
+        }}
+        
+        .btn-save:disabled {{
+            opacity: 0.5;
+            cursor: not-allowed;
+        }}
+        
         .ingredients .notes {{
             color: var(--text-muted);
             font-size: 0.9rem;
@@ -1081,12 +1309,32 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         </div>
     </div>
     
-    <h2>Ingredients</h2>
+    <div class="ingredients-header">
+        <h2>Ingredients</h2>
+        <button class="edit-btn" onclick="openMatchModal()">✎ Match Items</button>
+    </div>
     {availability_html}
     <div class="ingredients">
         <ul>
             {ingredients_html}
         </ul>
+    </div>
+    
+    <!-- Ingredient Match Modal -->
+    <div class="modal-overlay" id="match-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Match Ingredients to Inventory</h3>
+                <button class="modal-close" onclick="closeMatchModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="match-modal-body">
+                <!-- Populated by JS -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeMatchModal()">Cancel</button>
+                <button class="btn-save" onclick="saveMatches()" id="save-matches-btn">Save Matches</button>
+            </div>
+        </div>
     </div>
     
     <h2>Instructions</h2>
@@ -1104,6 +1352,9 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     
     <script>
         const missingIngredients = {missing_json};
+        const ingredientData = {ingredients_json};
+        const allItems = {items_json};
+        const recipeId = {recipe.id};
         
         async function toggleFavorite() {{
             await fetch('/api/recipes/{recipe.id}/favorite', {{ method: 'POST' }});
@@ -1116,33 +1367,40 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             btn.textContent = 'Adding...';
             
             let added = 0;
-            for (const ingredientName of missingIngredients) {{
+            for (const ingredient of missingIngredients) {{
                 try {{
-                    // First check if item exists
-                    const searchRes = await fetch(`/api/search?q=${{encodeURIComponent(ingredientName)}}`);
-                    const searchData = await searchRes.json();
+                    const ingredientName = ingredient.name;
+                    const itemId = ingredient.item_id;
                     
-                    const exactMatch = searchData.find(item => 
-                        item.name.toLowerCase() === ingredientName.toLowerCase()
-                    );
-                    
-                    if (exactMatch) {{
-                        // Move existing item to grocery
-                        await fetch(`/api/items/${{exactMatch.id}}/to-grocery`, {{ method: 'POST' }});
+                    if (itemId) {{
+                        // Move matched item to grocery
+                        await fetch(`/api/items/${{itemId}}/to-grocery`, {{ method: 'POST' }});
+                        added++;
                     }} else {{
-                        // Create new item in grocery
-                        await fetch('/api/items', {{
-                            method: 'POST',
-                            headers: {{ 'Content-Type': 'application/json' }},
-                            body: JSON.stringify({{
-                                name: ingredientName,
-                                location: 'grocery_list'
-                            }})
-                        }});
+                        // Search for item by name
+                        const searchRes = await fetch(`/api/search?q=${{encodeURIComponent(ingredientName)}}`);
+                        const searchData = await searchRes.json();
+                        
+                        const exactMatch = searchData.find(item => 
+                            item.name.toLowerCase() === ingredientName.toLowerCase()
+                        );
+                        
+                        if (exactMatch) {{
+                            await fetch(`/api/items/${{exactMatch.id}}/to-grocery`, {{ method: 'POST' }});
+                        }} else {{
+                            await fetch('/api/items', {{
+                                method: 'POST',
+                                headers: {{ 'Content-Type': 'application/json' }},
+                                body: JSON.stringify({{
+                                    name: ingredientName,
+                                    location: 'grocery_list'
+                                }})
+                            }});
+                        }}
+                        added++;
                     }}
-                    added++;
                 }} catch (err) {{
-                    console.error(`Failed to add ${{ingredientName}}:`, err);
+                    console.error(`Failed to add ${{ingredient.name}}:`, err);
                 }}
             }}
             
@@ -1151,6 +1409,80 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             
             // Reload after a moment to show updated status
             setTimeout(() => location.reload(), 1500);
+        }}
+        
+        // ========== Ingredient Matching Modal ==========
+        function openMatchModal() {{
+            const body = document.getElementById('match-modal-body');
+            
+            // Build options for each ingredient
+            let html = '<p style="margin-bottom: 1rem; color: var(--text-muted); font-size: 0.9rem;">Link ingredients to inventory items for accurate tracking.</p>';
+            
+            for (const ing of ingredientData) {{
+                const amountStr = ing.amount ? `${{ing.amount}} ` : '';
+                const unitStr = ing.unit ? `${{ing.unit}} ` : '';
+                
+                html += `
+                    <div class="match-item">
+                        <div class="match-item-name">${{amountStr}}${{unitStr}}${{ing.name}}</div>
+                        <select data-ingredient-id="${{ing.id}}">
+                            <option value="">-- No match --</option>
+                            ${{allItems.map(item => `
+                                <option value="${{item.id}}" ${{ing.item_id === item.id ? 'selected' : ''}}>
+                                    ${{item.name}} (${{item.location === 'inventory' ? '🏠' : item.location === 'grocery_list' ? '🛒' : '📦'}})
+                                </option>
+                            `).join('')}}
+                        </select>
+                    </div>
+                `;
+            }}
+            
+            body.innerHTML = html;
+            document.getElementById('match-modal').classList.add('active');
+        }}
+        
+        function closeMatchModal() {{
+            document.getElementById('match-modal').classList.remove('active');
+        }}
+        
+        async function saveMatches() {{
+            const btn = document.getElementById('save-matches-btn');
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+            
+            // Collect all ingredient matches
+            const selects = document.querySelectorAll('#match-modal-body select');
+            const updatedIngredients = ingredientData.map(ing => {{
+                const select = document.querySelector(`select[data-ingredient-id="${{ing.id}}"]`);
+                const itemId = select && select.value ? parseInt(select.value) : null;
+                return {{
+                    name: ing.name,
+                    amount: ing.amount || null,
+                    unit: ing.unit || null,
+                    notes: ing.notes || null,
+                    item_id: itemId
+                }};
+            }});
+            
+            try {{
+                const response = await fetch(`/api/recipes/${{recipeId}}`, {{
+                    method: 'PUT',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ ingredients: updatedIngredients }})
+                }});
+                
+                if (!response.ok) throw new Error('Failed to save');
+                
+                showToast('Ingredient matches saved!');
+                closeMatchModal();
+                
+                // Reload to show updated availability
+                setTimeout(() => location.reload(), 1000);
+            }} catch (err) {{
+                showToast('Failed to save matches');
+                btn.disabled = false;
+                btn.textContent = 'Save Matches';
+            }}
         }}
         
         function showToast(message) {{

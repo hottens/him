@@ -156,6 +156,56 @@
             display: block;
         }
 
+        /* Merge Section */
+        .merge-container {
+            padding: 1rem;
+            background: var(--surface);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .merge-sources {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg);
+        }
+
+        .merge-source-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .merge-source-item:last-child {
+            border-bottom: none;
+        }
+
+        .merge-source-item:hover {
+            background: rgba(139, 92, 246, 0.1);
+        }
+
+        .merge-source-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .merge-source-item.disabled {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .merge-source-item .item-location {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
         /* Main Content */
         main {
             padding: 1rem;
@@ -790,6 +840,7 @@
             <div class="sub-tabs">
                 <button class="sub-tab active" data-subtab="grocery-section">🛒 Grocery<span class="count" id="grocery-count">0</span></button>
                 <button class="sub-tab" data-subtab="inventory-section">🏠 Inventory<span class="count" id="inventory-count">0</span></button>
+                <button class="sub-tab" data-subtab="merge-section">🔀 Merge</button>
             </div>
 
             <!-- Grocery Section -->
@@ -825,6 +876,33 @@
                 
                 <div id="inventory-list" class="item-list"></div>
             </div>
+
+            <!-- Merge Section -->
+            <div id="merge-section" class="sub-panel">
+                <div class="merge-container">
+                    <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">
+                        Merge duplicate items into one. Barcodes and recipe links will be transferred to the target item.
+                    </p>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Target Item (keep this one)</label>
+                        <select class="form-select" id="merge-target">
+                            <option value="">Select target item...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Items to Merge (will be deleted)</label>
+                        <div id="merge-sources" class="merge-sources">
+                            <!-- Checkbox items populated by JS -->
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-danger btn-block" onclick="performMerge()" id="merge-btn" disabled>
+                        🔀 Merge Selected Items
+                    </button>
+                </div>
+            </div>
         </div>
 
         <!-- Recipes Panel (Saved + Favorites + Discover) -->
@@ -856,10 +934,27 @@
 
             <!-- Discover Section -->
             <div id="discover-section" class="sub-panel">
+                <!-- Gemini AI Suggestions -->
+                <div class="ai-section" style="border-color: var(--accent-purple); margin-bottom: 1rem;">
+                    <h3 style="color: var(--accent-purple);">✨ AI Recipe Ideas</h3>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                        Get creative recipe suggestions from Gemini AI
+                    </p>
+                    <div class="form-group" style="margin-bottom: 0.75rem;">
+                        <input type="text" class="form-input" id="gemini-query-input" 
+                               placeholder="Optional: soup, Italian, quick meals...">
+                    </div>
+                    <button class="btn btn-purple btn-block" onclick="getGeminiRecipes()" id="gemini-recipe-btn">
+                        ✨ Generate Recipe Ideas
+                    </button>
+                </div>
+                <div id="gemini-results"></div>
+
+                <!-- Spoonacular Search -->
                 <div class="ai-section" style="border-color: var(--accent-green);">
                     <h3 style="color: var(--accent-green);">🍳 Find Recipes</h3>
                     <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
-                        Discover recipes based on your inventory
+                        Search Spoonacular for recipes using your inventory
                     </p>
                     <button class="btn btn-success btn-block" onclick="discoverRecipes()" id="discover-btn">
                         🔍 Find What I Can Cook
@@ -1018,6 +1113,11 @@
             loadAllItems();
             loadRecipes();
             loadFavorites();
+
+            // Enter key support for Gemini query input
+            document.getElementById('gemini-query-input').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') getGeminiRecipes();
+            });
         });
 
         // Panel Navigation
@@ -1405,8 +1505,122 @@
                 datalist.innerHTML = allItems.map(item => 
                     `<option value="${item.name}">`
                 ).join('');
+                
+                // Update merge UI
+                updateMergeUI();
             } catch (err) {
                 console.error('Error loading items:', err);
+            }
+        }
+        
+        function updateMergeUI() {
+            // Update target dropdown
+            const targetSelect = document.getElementById('merge-target');
+            targetSelect.innerHTML = '<option value="">Select target item...</option>' +
+                allItems.map(item => `<option value="${item.id}">${item.name}</option>`).join('');
+            
+            // Update source checkboxes
+            const sourcesDiv = document.getElementById('merge-sources');
+            if (allItems.length === 0) {
+                sourcesDiv.innerHTML = '<p style="padding: 1rem; color: var(--text-secondary);">No items available</p>';
+                return;
+            }
+            
+            sourcesDiv.innerHTML = allItems.map(item => {
+                const locationIcon = item.location === 'inventory' ? '🏠' : 
+                                    item.location === 'grocery_list' ? '🛒' : '📦';
+                return `
+                    <label class="merge-source-item" data-item-id="${item.id}">
+                        <input type="checkbox" value="${item.id}" onchange="updateMergeButton()">
+                        <span>${item.name}</span>
+                        <span class="item-location">${locationIcon}</span>
+                    </label>
+                `;
+            }).join('');
+            
+            // Add event listener to target dropdown
+            targetSelect.onchange = updateMergeSourcesState;
+        }
+        
+        function updateMergeSourcesState() {
+            const targetId = document.getElementById('merge-target').value;
+            const sourceItems = document.querySelectorAll('#merge-sources .merge-source-item');
+            
+            sourceItems.forEach(item => {
+                const itemId = item.dataset.itemId;
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                
+                if (itemId === targetId) {
+                    item.classList.add('disabled');
+                    checkbox.checked = false;
+                    checkbox.disabled = true;
+                } else {
+                    item.classList.remove('disabled');
+                    checkbox.disabled = false;
+                }
+            });
+            
+            updateMergeButton();
+        }
+        
+        function updateMergeButton() {
+            const targetId = document.getElementById('merge-target').value;
+            const checkedSources = document.querySelectorAll('#merge-sources input[type="checkbox"]:checked');
+            const btn = document.getElementById('merge-btn');
+            
+            btn.disabled = !targetId || checkedSources.length === 0;
+        }
+        
+        async function performMerge() {
+            const targetId = parseInt(document.getElementById('merge-target').value);
+            const checkedSources = document.querySelectorAll('#merge-sources input[type="checkbox"]:checked');
+            const sourceIds = Array.from(checkedSources).map(cb => parseInt(cb.value));
+            
+            if (!targetId || sourceIds.length === 0) {
+                showToast('Select target and at least one source item', 'error');
+                return;
+            }
+            
+            const targetItem = allItems.find(i => i.id === targetId);
+            const sourceCount = sourceIds.length;
+            
+            if (!confirm(`Merge ${sourceCount} item(s) into "${targetItem.name}"? This cannot be undone.`)) {
+                return;
+            }
+            
+            const btn = document.getElementById('merge-btn');
+            btn.disabled = true;
+            btn.textContent = 'Merging...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/items/merge`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        target_id: targetId,
+                        source_ids: sourceIds
+                    })
+                });
+                
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Merge failed');
+                }
+                
+                showToast(`Merged ${sourceCount} items into "${targetItem.name}"`, 'success');
+                
+                // Reload all data
+                await loadAllItems();
+                await loadInventory();
+                await loadGrocery();
+                
+                // Reset form
+                document.getElementById('merge-target').value = '';
+                updateMergeButton();
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                btn.textContent = '🔀 Merge Selected Items';
             }
         }
 
@@ -1846,6 +2060,132 @@
                 closeGroceryMatchModal();
                 loadGrocery();
                 loadAllItems();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        // ========== Gemini AI Recipe Suggestions ==========
+        async function getGeminiRecipes() {
+            const btn = document.getElementById('gemini-recipe-btn');
+            const container = document.getElementById('gemini-results');
+            const queryInput = document.getElementById('gemini-query-input');
+            const query = queryInput.value.trim();
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Generating...';
+            container.innerHTML = '';
+
+            try {
+                // Get inventory items
+                const invResponse = await fetch(`${API_BASE}/inventory`);
+                const invData = await invResponse.json();
+                const inventoryItems = invData.items.map(item => item.name);
+
+                if (inventoryItems.length === 0) {
+                    throw new Error('Add some items to your inventory first');
+                }
+
+                const requestBody = { inventory_items: inventoryItems };
+                if (query) {
+                    requestBody.query = query;
+                }
+
+                const response = await fetch(`${API_BASE}/ai/recipe-suggestions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to generate recipes');
+                }
+
+                const data = await response.json();
+                renderGeminiRecipes(data.suggestions);
+            } catch (err) {
+                container.innerHTML = `<p style="color: var(--accent-red); margin-top: 1rem;">${err.message}</p>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '✨ Generate Recipe Ideas';
+            }
+        }
+
+        function renderGeminiRecipes(recipes) {
+            const container = document.getElementById('gemini-results');
+
+            if (!recipes || recipes.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-secondary); margin-top: 1rem;">No recipes generated. Try again.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="section-divider">✨ AI Suggestions</div>
+                <div style="display: grid; gap: 0.75rem;">
+                    ${recipes.map((r, idx) => `
+                        <div class="recipe-card gemini-recipe" data-index="${idx}">
+                            <h3 style="font-size: 0.95rem; margin: 0 0 0.5rem 0; color: var(--accent-purple);">${r.name}</h3>
+                            <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0 0 0.5rem 0;">${r.description}</p>
+                            <div class="recipe-meta" style="margin-bottom: 0.5rem;">
+                                ${r.servings} servings
+                                ${r.prep_time_minutes ? ` • ${r.prep_time_minutes}min prep` : ''}
+                                ${r.cook_time_minutes ? ` • ${r.cook_time_minutes}min cook` : ''}
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                <button class="btn btn-sm" onclick="toggleGeminiDetails(${idx})">View Details</button>
+                                <button class="btn btn-sm btn-primary" onclick="saveGeminiRecipe(${idx})">💾 Save Recipe</button>
+                            </div>
+                            <div class="gemini-details" id="gemini-details-${idx}" style="display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border);">
+                                <h4 style="font-size: 0.85rem; margin: 0 0 0.5rem 0;">Ingredients:</h4>
+                                <ul style="font-size: 0.85rem; margin: 0 0 0.75rem 1rem;">
+                                    ${r.ingredients.map(i => `<li>${i.amount || ''} ${i.unit || ''} ${i.name}${i.notes ? ` (${i.notes})` : ''}</li>`).join('')}
+                                </ul>
+                                <h4 style="font-size: 0.85rem; margin: 0 0 0.5rem 0;">Steps:</h4>
+                                <ol style="font-size: 0.85rem; margin: 0 0 0 1rem;">
+                                    ${r.steps.map(s => `<li>${s.instruction}</li>`).join('')}
+                                </ol>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+
+            // Store recipes for saving
+            window.geminiRecipes = recipes;
+        }
+
+        function toggleGeminiDetails(index) {
+            const details = document.getElementById(`gemini-details-${index}`);
+            details.style.display = details.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function saveGeminiRecipe(index) {
+            const recipe = window.geminiRecipes[index];
+            if (!recipe) {
+                showToast('Recipe not found', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/recipes`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(recipe)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to save recipe');
+                }
+
+                const saved = await response.json();
+                showToast(`Saved: ${saved.name}`, 'success');
+                loadRecipes();
+                loadFavorites();
+
+                // Navigate to the saved recipe
+                window.location.href = `/recipe/${saved.id}`;
             } catch (err) {
                 showToast(err.message, 'error');
             }

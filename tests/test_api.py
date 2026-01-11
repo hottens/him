@@ -278,6 +278,144 @@ class TestItemCRUD:
         assert response.json()["found"] is False
 
 
+class TestItemMerge:
+    """Tests for item merge functionality."""
+
+    def test_merge_items(self, client):
+        """Test merging multiple items into one."""
+        # Create target item
+        target = client.post(
+            "/api/items",
+            json={"name": "Target Item", "location": "inventory"}
+        ).json()
+        
+        # Create source items
+        source1 = client.post(
+            "/api/items",
+            json={"name": "Source Item 1", "location": "grocery_list"}
+        ).json()
+        source2 = client.post(
+            "/api/items",
+            json={"name": "Source Item 2", "location": "neither"}
+        ).json()
+        
+        # Add barcodes to source items
+        client.post(
+            "/api/barcode/associate",
+            json={"barcode": "SOURCE1_BC", "item_id": source1["id"]}
+        )
+        client.post(
+            "/api/barcode/associate",
+            json={"barcode": "SOURCE2_BC", "item_id": source2["id"]}
+        )
+        
+        # Merge items
+        response = client.post(
+            "/api/items/merge",
+            json={"target_id": target["id"], "source_ids": [source1["id"], source2["id"]]}
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == target["id"]
+        assert data["name"] == "Target Item"
+        
+        # Verify source items are deleted
+        assert client.get(f"/api/items/{source1['id']}").status_code == 404
+        assert client.get(f"/api/items/{source2['id']}").status_code == 404
+        
+        # Verify barcodes transferred to target
+        bc1_response = client.get("/api/barcode/SOURCE1_BC")
+        assert bc1_response.json()["found"] is True
+        assert bc1_response.json()["item"]["id"] == target["id"]
+        
+        bc2_response = client.get("/api/barcode/SOURCE2_BC")
+        assert bc2_response.json()["found"] is True
+        assert bc2_response.json()["item"]["id"] == target["id"]
+
+    def test_merge_items_target_not_found(self, client):
+        """Test merging with non-existent target."""
+        source = client.post(
+            "/api/items",
+            json={"name": "Some Item"}
+        ).json()
+        
+        response = client.post(
+            "/api/items/merge",
+            json={"target_id": 99999, "source_ids": [source["id"]]}
+        )
+        
+        assert response.status_code == 404
+        assert "Target item not found" in response.json()["detail"]
+
+    def test_merge_items_source_not_found(self, client):
+        """Test merging with non-existent source."""
+        target = client.post(
+            "/api/items",
+            json={"name": "Target"}
+        ).json()
+        
+        response = client.post(
+            "/api/items/merge",
+            json={"target_id": target["id"], "source_ids": [99999]}
+        )
+        
+        assert response.status_code == 404
+        assert "Source item" in response.json()["detail"]
+
+    def test_merge_items_target_in_sources(self, client):
+        """Test that target cannot be in source items."""
+        target = client.post(
+            "/api/items",
+            json={"name": "Target"}
+        ).json()
+        
+        response = client.post(
+            "/api/items/merge",
+            json={"target_id": target["id"], "source_ids": [target["id"]]}
+        )
+        
+        assert response.status_code == 400
+        assert "Target item cannot be in source items" in response.json()["detail"]
+
+    def test_merge_updates_recipe_ingredients(self, client):
+        """Test that merging updates recipe ingredient links."""
+        # Create items
+        target = client.post(
+            "/api/items",
+            json={"name": "Kerrie", "location": "inventory"}
+        ).json()
+        source = client.post(
+            "/api/items",
+            json={"name": "Kerrie Poeder", "location": "neither"}
+        ).json()
+        
+        # Create recipe with ingredient linked to source item
+        recipe = client.post(
+            "/api/recipes",
+            json={
+                "name": "Curry Dish",
+                "ingredients": [
+                    {"name": "Curry powder", "item_id": source["id"]}
+                ],
+                "steps": [{"step_number": 1, "instruction": "Cook"}]
+            }
+        ).json()
+        
+        # Merge items
+        response = client.post(
+            "/api/items/merge",
+            json={"target_id": target["id"], "source_ids": [source["id"]]}
+        )
+        assert response.status_code == 200
+        
+        # Verify recipe ingredient now linked to target
+        recipe_response = client.get(f"/api/recipes/{recipe['id']}")
+        recipe_data = recipe_response.json()
+        assert recipe_data["ingredients"][0]["item_id"] == target["id"]
+        assert recipe_data["ingredients"][0]["matched_item"]["id"] == target["id"]
+
+
 class TestMoveItemShortcuts:
     """Tests for the move item shortcut endpoints."""
 
@@ -809,6 +947,98 @@ class TestRecipeFullUpdate:
         )
         
         assert response.status_code == 404
+
+
+class TestIngredientMatching:
+    """Tests for ingredient-to-item matching in recipes."""
+
+    def test_create_recipe_with_item_id(self, client):
+        """Test creating a recipe with ingredients linked to items."""
+        # Create an item first
+        item = client.post(
+            "/api/items",
+            json={"name": "Olive Oil", "location": "inventory"}
+        ).json()
+        
+        # Create recipe with ingredient linked to item
+        response = client.post(
+            "/api/recipes",
+            json={
+                "name": "Pasta Recipe",
+                "ingredients": [
+                    {"name": "Extra Virgin Olive Oil", "amount": "2", "unit": "tbsp", "item_id": item["id"]}
+                ],
+                "steps": [{"step_number": 1, "instruction": "Drizzle oil"}]
+            }
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["ingredients"]) == 1
+        assert data["ingredients"][0]["item_id"] == item["id"]
+        assert data["ingredients"][0]["matched_item"]["id"] == item["id"]
+        assert data["ingredients"][0]["matched_item"]["name"] == "Olive Oil"
+
+    def test_update_recipe_ingredient_item_id(self, client, sample_recipe):
+        """Test updating recipe to link ingredients to items."""
+        # Create an item
+        item = client.post(
+            "/api/items",
+            json={"name": "Fresh Pasta", "location": "inventory"}
+        ).json()
+        
+        # Update recipe to link ingredient to item
+        response = client.put(
+            f"/api/recipes/{sample_recipe['id']}",
+            json={
+                "ingredients": [
+                    {"name": "Pasta", "amount": "200", "unit": "g", "item_id": item["id"]}
+                ]
+            }
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ingredients"][0]["item_id"] == item["id"]
+        assert data["ingredients"][0]["matched_item"]["id"] == item["id"]
+
+    def test_ingredient_matched_item_shows_location(self, client):
+        """Test that matched item includes location information."""
+        # Create item in grocery list
+        item = client.post(
+            "/api/items",
+            json={"name": "Butter", "location": "grocery_list"}
+        ).json()
+        
+        # Create recipe with linked ingredient
+        recipe = client.post(
+            "/api/recipes",
+            json={
+                "name": "Buttery Dish",
+                "ingredients": [
+                    {"name": "Unsalted Butter", "item_id": item["id"]}
+                ],
+                "steps": [{"step_number": 1, "instruction": "Melt butter"}]
+            }
+        ).json()
+        
+        assert recipe["ingredients"][0]["matched_item"]["location"] == "grocery_list"
+
+    def test_ingredient_without_item_id(self, client):
+        """Test that ingredients without item_id have no matched_item."""
+        recipe = client.post(
+            "/api/recipes",
+            json={
+                "name": "Simple Recipe",
+                "ingredients": [
+                    {"name": "Salt", "amount": "1", "unit": "tsp"}
+                ],
+                "steps": [{"step_number": 1, "instruction": "Add salt"}]
+            }
+        ).json()
+        
+        assert recipe["ingredients"][0]["item_id"] is None
+        assert recipe["ingredients"][0]["matched_item"] is None
 
 
 class TestSpoonacularEndpoints:
