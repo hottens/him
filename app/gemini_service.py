@@ -50,11 +50,7 @@ Focus on recipes that match this request. For example:
     else:
         query_instruction = ""
     
-    prompt = f"""You are a helpful professional cook. Based on the following inventory items, suggest 3 recipes that can be made.
-Considering my inventory, take the following into account:
-1. Prioritize classic pairings. Only suggest recipes that follow established culinary themes.
-2. Do a flavor profile sanity check. Before outputting, evaluate if the ingredients are balanced and complementary. Remove weird combinations.
-3. Mandatory omissions: Do not feel obligated to use every ingredient in the inventory.
+    prompt = f"""You are a helpful cooking assistant. Based on the following inventory items, suggest 3 recipes that can be made.
 
 INVENTORY ITEMS:
 {inventory_str}

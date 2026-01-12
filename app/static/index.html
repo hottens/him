@@ -156,56 +156,6 @@
             display: block;
         }
 
-        /* Merge Section */
-        .merge-container {
-            padding: 1rem;
-            background: var(--surface);
-            border-radius: 12px;
-            border: 1px solid var(--border);
-        }
-
-        .merge-sources {
-            max-height: 300px;
-            overflow-y: auto;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            background: var(--bg);
-        }
-
-        .merge-source-item {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            padding: 0.75rem 1rem;
-            border-bottom: 1px solid var(--border);
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .merge-source-item:last-child {
-            border-bottom: none;
-        }
-
-        .merge-source-item:hover {
-            background: rgba(139, 92, 246, 0.1);
-        }
-
-        .merge-source-item input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-        }
-
-        .merge-source-item.disabled {
-            opacity: 0.4;
-            pointer-events: none;
-        }
-
-        .merge-source-item .item-location {
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-        }
-
         /* Main Content */
         main {
             padding: 1rem;
@@ -840,7 +790,6 @@
             <div class="sub-tabs">
                 <button class="sub-tab active" data-subtab="grocery-section">🛒 Grocery<span class="count" id="grocery-count">0</span></button>
                 <button class="sub-tab" data-subtab="inventory-section">🏠 Inventory<span class="count" id="inventory-count">0</span></button>
-                <button class="sub-tab" data-subtab="merge-section">🔀 Merge</button>
             </div>
 
             <!-- Grocery Section -->
@@ -875,33 +824,6 @@
                 </div>
                 
                 <div id="inventory-list" class="item-list"></div>
-            </div>
-
-            <!-- Merge Section -->
-            <div id="merge-section" class="sub-panel">
-                <div class="merge-container">
-                    <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">
-                        Merge duplicate items into one. Barcodes and recipe links will be transferred to the target item.
-                    </p>
-                    
-                    <div class="form-group">
-                        <label class="form-label">Target Item (keep this one)</label>
-                        <select class="form-select" id="merge-target">
-                            <option value="">Select target item...</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label class="form-label">Items to Merge (will be deleted)</label>
-                        <div id="merge-sources" class="merge-sources">
-                            <!-- Checkbox items populated by JS -->
-                        </div>
-                    </div>
-                    
-                    <button class="btn btn-danger btn-block" onclick="performMerge()" id="merge-btn" disabled>
-                        🔀 Merge Selected Items
-                    </button>
-                </div>
             </div>
         </div>
 
@@ -1505,122 +1427,8 @@
                 datalist.innerHTML = allItems.map(item => 
                     `<option value="${item.name}">`
                 ).join('');
-                
-                // Update merge UI
-                updateMergeUI();
             } catch (err) {
                 console.error('Error loading items:', err);
-            }
-        }
-        
-        function updateMergeUI() {
-            // Update target dropdown
-            const targetSelect = document.getElementById('merge-target');
-            targetSelect.innerHTML = '<option value="">Select target item...</option>' +
-                allItems.map(item => `<option value="${item.id}">${item.name}</option>`).join('');
-            
-            // Update source checkboxes
-            const sourcesDiv = document.getElementById('merge-sources');
-            if (allItems.length === 0) {
-                sourcesDiv.innerHTML = '<p style="padding: 1rem; color: var(--text-secondary);">No items available</p>';
-                return;
-            }
-            
-            sourcesDiv.innerHTML = allItems.map(item => {
-                const locationIcon = item.location === 'inventory' ? '🏠' : 
-                                    item.location === 'grocery_list' ? '🛒' : '📦';
-                return `
-                    <label class="merge-source-item" data-item-id="${item.id}">
-                        <input type="checkbox" value="${item.id}" onchange="updateMergeButton()">
-                        <span>${item.name}</span>
-                        <span class="item-location">${locationIcon}</span>
-                    </label>
-                `;
-            }).join('');
-            
-            // Add event listener to target dropdown
-            targetSelect.onchange = updateMergeSourcesState;
-        }
-        
-        function updateMergeSourcesState() {
-            const targetId = document.getElementById('merge-target').value;
-            const sourceItems = document.querySelectorAll('#merge-sources .merge-source-item');
-            
-            sourceItems.forEach(item => {
-                const itemId = item.dataset.itemId;
-                const checkbox = item.querySelector('input[type="checkbox"]');
-                
-                if (itemId === targetId) {
-                    item.classList.add('disabled');
-                    checkbox.checked = false;
-                    checkbox.disabled = true;
-                } else {
-                    item.classList.remove('disabled');
-                    checkbox.disabled = false;
-                }
-            });
-            
-            updateMergeButton();
-        }
-        
-        function updateMergeButton() {
-            const targetId = document.getElementById('merge-target').value;
-            const checkedSources = document.querySelectorAll('#merge-sources input[type="checkbox"]:checked');
-            const btn = document.getElementById('merge-btn');
-            
-            btn.disabled = !targetId || checkedSources.length === 0;
-        }
-        
-        async function performMerge() {
-            const targetId = parseInt(document.getElementById('merge-target').value);
-            const checkedSources = document.querySelectorAll('#merge-sources input[type="checkbox"]:checked');
-            const sourceIds = Array.from(checkedSources).map(cb => parseInt(cb.value));
-            
-            if (!targetId || sourceIds.length === 0) {
-                showToast('Select target and at least one source item', 'error');
-                return;
-            }
-            
-            const targetItem = allItems.find(i => i.id === targetId);
-            const sourceCount = sourceIds.length;
-            
-            if (!confirm(`Merge ${sourceCount} item(s) into "${targetItem.name}"? This cannot be undone.`)) {
-                return;
-            }
-            
-            const btn = document.getElementById('merge-btn');
-            btn.disabled = true;
-            btn.textContent = 'Merging...';
-            
-            try {
-                const response = await fetch(`${API_BASE}/items/merge`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        target_id: targetId,
-                        source_ids: sourceIds
-                    })
-                });
-                
-                if (!response.ok) {
-                    const data = await response.json();
-                    throw new Error(data.detail || 'Merge failed');
-                }
-                
-                showToast(`Merged ${sourceCount} items into "${targetItem.name}"`, 'success');
-                
-                // Reload all data
-                await loadAllItems();
-                await loadInventory();
-                await loadGrocery();
-                
-                // Reset form
-                document.getElementById('merge-target').value = '';
-                updateMergeButton();
-            } catch (err) {
-                showToast(err.message, 'error');
-            } finally {
-                btn.textContent = '🔀 Merge Selected Items';
             }
         }
 

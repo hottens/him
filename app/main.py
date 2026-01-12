@@ -214,61 +214,6 @@ async def delete_item(item_id: int, db: Session = Depends(get_db)):
     return {"deleted": True, "id": item_id}
 
 
-@app.post("/api/items/merge", response_model=schemas.ItemResponse)
-async def merge_items(
-    request: schemas.ItemMergeRequest,
-    db: Session = Depends(get_db)
-):
-    """
-    Merge multiple items into one.
-    
-    - Transfers all barcodes from source items to target item
-    - Updates all recipe ingredient links to point to target item
-    - Deletes the source items
-    """
-    # Validate target exists
-    target = db.query(Item).filter(Item.id == request.target_id).first()
-    if not target:
-        raise HTTPException(status_code=404, detail="Target item not found")
-    
-    # Validate source items exist
-    for source_id in request.source_ids:
-        if source_id == request.target_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Target item cannot be in source items"
-            )
-        source = db.query(Item).filter(Item.id == source_id).first()
-        if not source:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Source item with id {source_id} not found"
-            )
-    
-    # Transfer barcodes from source items to target
-    for source_id in request.source_ids:
-        db.query(Barcode).filter(Barcode.item_id == source_id).update(
-            {"item_id": request.target_id}
-        )
-    
-    # Update recipe ingredient links
-    for source_id in request.source_ids:
-        db.query(RecipeIngredient).filter(
-            RecipeIngredient.item_id == source_id
-        ).update({"item_id": request.target_id})
-    
-    # Delete source items
-    for source_id in request.source_ids:
-        source = db.query(Item).filter(Item.id == source_id).first()
-        if source:
-            db.delete(source)
-    
-    db.commit()
-    db.refresh(target)
-    
-    return target
-
-
 # --- Move Item Shortcuts ---
 
 @app.post("/api/items/{item_id}/to-inventory", response_model=schemas.ItemResponse)
@@ -392,7 +337,7 @@ async def create_recipe(recipe: schemas.RecipeCreate, db: Session = Depends(get_
             amount=ing.amount,
             unit=ing.unit,
             notes=ing.notes,
-            item_id=ing.item_id  # Optional link to inventory item
+            item_id=ing.item_id
         )
         db.add(db_ingredient)
     
@@ -470,7 +415,7 @@ async def update_recipe_full(
                 amount=ing.amount,
                 unit=ing.unit,
                 notes=ing.notes,
-                item_id=ing.item_id  # Optional link to inventory item
+                item_id=ing.item_id
             )
             db.add(db_ingredient)
     
@@ -828,37 +773,41 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
     
-    # Get all items for dropdown (including location info)
+    # Get all items for dropdown (sorted by name)
     all_items = db.query(Item).order_by(Item.name).all()
-    # Get inventory items for fallback name-based matching
-    inventory_items = db.query(Item).filter(Item.location == ItemLocation.INVENTORY).all()
-    inventory_names = {item.name.lower(): item for item in inventory_items}
+    # Get inventory item IDs for availability check
+    inventory_item_ids = {item.id for item in all_items if item.location == ItemLocation.INVENTORY}
+    inventory_names = {item.name.lower() for item in all_items if item.location == ItemLocation.INVENTORY}
     
     # Sort steps by step_number
     sorted_steps = sorted(recipe.steps, key=lambda s: s.step_number)
     
-    # Generate ingredients HTML with availability status
-    # Prioritize matched_item for availability, fallback to name matching
+    # Build ingredient data for JSON and HTML
+    import json
+    ingredient_data = []
     ingredients_html = ""
     missing_ingredients = []
-    ingredient_data = []  # For JS
+    
     for ing in recipe.ingredients:
         amount_str = f"{ing.amount} " if ing.amount else ""
         unit_str = f"{ing.unit} " if ing.unit else ""
         notes_str = f" <span class='notes'>({ing.notes})</span>" if ing.notes else ""
         
-        # Determine availability: prioritize matched_item, fallback to name match
-        matched_item_name = None
-        if ing.matched_item:
-            is_available = ing.matched_item.location == ItemLocation.INVENTORY
-            matched_item_name = ing.matched_item.name
-        elif ing.name.lower() in inventory_names:
-            is_available = True
+        # Check availability: prefer item_id match, fallback to name match
+        if ing.item_id and ing.matched_item:
+            is_available = ing.item_id in inventory_item_ids
+            matched_name = ing.matched_item.name
         else:
-            is_available = False
+            is_available = ing.name.lower() in inventory_names
+            matched_name = None
         
         status_icon = "✓" if is_available else "✗"
         status_class = "available" if is_available else "missing"
+        
+        # Show matched item if different from ingredient name
+        match_info = ""
+        if matched_name and matched_name.lower() != ing.name.lower():
+            match_info = f" <span class='matched-to'>→ {matched_name}</span>"
         
         if not is_available:
             missing_ingredients.append({
@@ -866,7 +815,9 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 "item_id": ing.item_id
             })
         
-        # Store ingredient data for JS edit modal
+        ingredients_html += f"<li class='{status_class}' data-ing-id='{ing.id}'><span class='status-icon'>{status_icon}</span> {amount_str}{unit_str}{ing.name}{notes_str}{match_info}</li>"
+        
+        # Store ingredient data for JS
         ingredient_data.append({
             "id": ing.id,
             "name": ing.name,
@@ -875,13 +826,6 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             "notes": ing.notes or "",
             "item_id": ing.item_id
         })
-        
-        # Show matched item name if different from ingredient name
-        match_info = ""
-        if matched_item_name and matched_item_name.lower() != ing.name.lower():
-            match_info = f" <span class='matched-to'>→ {matched_item_name}</span>"
-        
-        ingredients_html += f"<li class='{status_class}' data-ing-id='{ing.id}'><span class='status-icon'>{status_icon}</span> {amount_str}{unit_str}{ing.name}{notes_str}{match_info}</li>"
     
     # Generate steps HTML
     steps_html = ""
@@ -893,7 +837,6 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     time_str = f"{total_time} min" if total_time else "—"
     
     # JSON data for JavaScript
-    import json
     missing_json = json.dumps(missing_ingredients)
     ingredients_json = json.dumps(ingredient_data)
     items_json = json.dumps([
@@ -1451,7 +1394,6 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             btn.textContent = 'Saving...';
             
             // Collect all ingredient matches
-            const selects = document.querySelectorAll('#match-modal-body select');
             const updatedIngredients = ingredientData.map(ing => {{
                 const select = document.querySelector(`select[data-ingredient-id="${{ing.id}}"]`);
                 const itemId = select && select.value ? parseInt(select.value) : null;
