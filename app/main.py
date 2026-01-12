@@ -1026,7 +1026,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         
         .ingredients li.available .status-icon {{ color: var(--accent-green); }}
         .ingredients li.missing .status-icon {{ color: var(--accent-red); }}
-        .ingredients li.missing {{ opacity: 0.7; }}
+        .ingredients li.missing {{ color: var(--text-muted); }}
         
         .matched-to {{
             color: var(--text-muted);
