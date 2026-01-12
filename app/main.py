@@ -815,7 +815,13 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 "item_id": ing.item_id
             })
         
-        ingredients_html += f"<li class='{status_class}' data-ing-id='{ing.id}'><span class='status-icon'>{status_icon}</span> {amount_str}{unit_str}{ing.name}{notes_str}{match_info}</li>"
+        ingredients_html += f"""<li class='{status_class}' data-ing-id='{ing.id}'>
+            <span class='status-icon'>{status_icon}</span>
+            <div class='ingredient-content' onclick='openIngredientDropdown({ing.id})'>
+                {amount_str}{unit_str}{ing.name}{notes_str}{match_info}
+            </div>
+            <div class='ingredient-dropdown' id='dropdown-{ing.id}'></div>
+        </li>"""
         
         # Store ingredient data for JS
         ingredient_data.append({
@@ -1013,6 +1019,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             display: flex;
             align-items: flex-start;
             gap: 0.5rem;
+            position: relative;
         }}
         
         .ingredients li:last-child {{ border-bottom: none; }}
@@ -1027,133 +1034,144 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             font-style: italic;
         }}
         
-        .ingredients-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 0.5rem;
-        }}
-        
-        .edit-btn {{
-            background: transparent;
-            border: 1px solid var(--border);
-            color: var(--text-muted);
-            padding: 0.4rem 0.8rem;
-            border-radius: 6px;
-            font-size: 0.8rem;
+        /* Clickable ingredient styling */
+        .ingredient-content {{
+            flex: 1;
             cursor: pointer;
-            transition: all 0.2s;
+            padding: 0.25rem 0.5rem;
+            margin: -0.25rem 0;
+            border-radius: 6px;
+            transition: background 0.15s;
+            position: relative;
         }}
         
-        .edit-btn:hover {{
-            border-color: var(--accent);
-            color: var(--accent);
+        .ingredient-content:hover {{
+            background: rgba(196, 92, 38, 0.08);
         }}
         
-        .modal-overlay {{
-            position: fixed;
-            top: 0;
+        .ingredient-content::after {{
+            content: '✎';
+            position: absolute;
+            right: 0.5rem;
+            top: 50%;
+            transform: translateY(-50%);
+            opacity: 0;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            transition: opacity 0.15s;
+        }}
+        
+        .ingredient-content:hover::after {{
+            opacity: 1;
+        }}
+        
+        /* Ingredient dropdown */
+        .ingredient-dropdown {{
+            position: absolute;
+            top: 100%;
             left: 0;
             right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+            z-index: 100;
+            margin-top: 4px;
             display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            padding: 1rem;
         }}
         
-        .modal-overlay.active {{ display: flex; }}
-        
-        .modal {{
-            background: var(--bg);
-            border-radius: 12px;
-            max-width: 500px;
-            width: 100%;
-            max-height: 80vh;
-            overflow-y: auto;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        .ingredient-dropdown.active {{
+            display: block;
         }}
         
-        .modal-header {{
-            padding: 1rem 1.5rem;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }}
-        
-        .modal-header h3 {{
-            font-family: 'Crimson Pro', serif;
-            font-size: 1.3rem;
-            margin: 0;
-        }}
-        
-        .modal-close {{
-            background: none;
-            border: none;
-            font-size: 1.5rem;
-            cursor: pointer;
-            color: var(--text-muted);
-        }}
-        
-        .modal-body {{
-            padding: 1.5rem;
-        }}
-        
-        .match-item {{
-            padding: 0.75rem 0;
+        .dropdown-search {{
+            padding: 0.75rem;
             border-bottom: 1px solid var(--border);
         }}
         
-        .match-item:last-child {{ border-bottom: none; }}
-        
-        .match-item-name {{
-            font-weight: 500;
-            margin-bottom: 0.4rem;
-        }}
-        
-        .match-item select {{
+        .dropdown-search input {{
             width: 100%;
-            padding: 0.5rem;
+            padding: 0.5rem 0.75rem;
             border: 1px solid var(--border);
             border-radius: 6px;
             font-size: 0.9rem;
-            background: #fff;
+            outline: none;
         }}
         
-        .modal-footer {{
-            padding: 1rem 1.5rem;
+        .dropdown-search input:focus {{
+            border-color: var(--accent);
+        }}
+        
+        .dropdown-items {{
+            max-height: 200px;
+            overflow-y: auto;
+        }}
+        
+        .dropdown-item {{
+            padding: 0.6rem 0.75rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: background 0.1s;
+        }}
+        
+        .dropdown-item:hover {{
+            background: rgba(196, 92, 38, 0.08);
+        }}
+        
+        .dropdown-item.selected {{
+            background: rgba(196, 92, 38, 0.15);
+        }}
+        
+        .dropdown-item .item-icon {{
+            font-size: 0.9rem;
+        }}
+        
+        .dropdown-item .item-name {{
+            flex: 1;
+        }}
+        
+        .dropdown-item.no-match {{
+            color: var(--text-muted);
+            font-style: italic;
+        }}
+        
+        .dropdown-footer {{
+            padding: 0.75rem;
             border-top: 1px solid var(--border);
             display: flex;
             gap: 0.5rem;
-            justify-content: flex-end;
         }}
         
-        .modal-footer button {{
-            padding: 0.6rem 1.2rem;
+        .dropdown-footer button {{
+            flex: 1;
+            padding: 0.5rem;
             border-radius: 6px;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.15s;
         }}
         
-        .btn-cancel {{
+        .btn-add-grocery {{
+            background: var(--accent);
+            color: #fff;
+            border: none;
+        }}
+        
+        .btn-add-grocery:hover {{
+            opacity: 0.9;
+        }}
+        
+        .btn-clear-match {{
             background: transparent;
             border: 1px solid var(--border);
             color: var(--text-muted);
         }}
         
-        .btn-save {{
-            background: var(--accent);
-            border: none;
-            color: #fff;
-        }}
-        
-        .btn-save:disabled {{
-            opacity: 0.5;
-            cursor: not-allowed;
+        .btn-clear-match:hover {{
+            border-color: var(--accent-red);
+            color: var(--accent-red);
         }}
         
         .ingredients .notes {{
@@ -1252,32 +1270,13 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         </div>
     </div>
     
-    <div class="ingredients-header">
-        <h2>Ingredients</h2>
-        <button class="edit-btn" onclick="openMatchModal()">✎ Match Items</button>
-    </div>
+    <h2>Ingredients</h2>
+    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">Click an ingredient to link it to an inventory item</p>
     {availability_html}
     <div class="ingredients">
         <ul>
             {ingredients_html}
         </ul>
-    </div>
-    
-    <!-- Ingredient Match Modal -->
-    <div class="modal-overlay" id="match-modal">
-        <div class="modal">
-            <div class="modal-header">
-                <h3>Match Ingredients to Inventory</h3>
-                <button class="modal-close" onclick="closeMatchModal()">&times;</button>
-            </div>
-            <div class="modal-body" id="match-modal-body">
-                <!-- Populated by JS -->
-            </div>
-            <div class="modal-footer">
-                <button class="btn-cancel" onclick="closeMatchModal()">Cancel</button>
-                <button class="btn-save" onclick="saveMatches()" id="save-matches-btn">Save Matches</button>
-            </div>
-        </div>
     </div>
     
     <h2>Instructions</h2>
@@ -1354,57 +1353,105 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             setTimeout(() => location.reload(), 1500);
         }}
         
-        // ========== Ingredient Matching Modal ==========
-        function openMatchModal() {{
-            const body = document.getElementById('match-modal-body');
+        // ========== Ingredient Dropdown Matching ==========
+        let activeDropdown = null;
+        
+        function openIngredientDropdown(ingId) {{
+            // Close any open dropdown
+            closeAllDropdowns();
             
-            // Build options for each ingredient
-            let html = '<p style="margin-bottom: 1rem; color: var(--text-muted); font-size: 0.9rem;">Link ingredients to inventory items for accurate tracking.</p>';
+            const dropdown = document.getElementById(`dropdown-${{ingId}}`);
+            const ing = ingredientData.find(i => i.id === ingId);
+            if (!dropdown || !ing) return;
             
-            for (const ing of ingredientData) {{
-                const amountStr = ing.amount ? `${{ing.amount}} ` : '';
-                const unitStr = ing.unit ? `${{ing.unit}} ` : '';
-                
-                html += `
-                    <div class="match-item">
-                        <div class="match-item-name">${{amountStr}}${{unitStr}}${{ing.name}}</div>
-                        <select data-ingredient-id="${{ing.id}}">
-                            <option value="">-- No match --</option>
-                            ${{allItems.map(item => `
-                                <option value="${{item.id}}" ${{ing.item_id === item.id ? 'selected' : ''}}>
-                                    ${{item.name}} (${{item.location === 'inventory' ? '🏠' : item.location === 'grocery_list' ? '🛒' : '📦'}})
-                                </option>
-                            `).join('')}}
-                        </select>
-                    </div>
-                `;
+            // Build dropdown content
+            dropdown.innerHTML = `
+                <div class="dropdown-search">
+                    <input type="text" placeholder="Search items..." oninput="filterDropdownItems(${{ingId}}, this.value)" autofocus>
+                </div>
+                <div class="dropdown-items" id="dropdown-items-${{ingId}}">
+                    ${{renderDropdownItems(ingId, '')}}
+                </div>
+                <div class="dropdown-footer">
+                    ${{ing.item_id ? `<button class="btn-clear-match" onclick="clearMatch(${{ingId}})">✕ Clear match</button>` : ''}}
+                    <button class="btn-add-grocery" onclick="addIngredientToGrocery(${{ingId}})">🛒 Add "${{ing.name}}" to grocery</button>
+                </div>
+            `;
+            
+            dropdown.classList.add('active');
+            activeDropdown = ingId;
+            
+            // Focus search input
+            setTimeout(() => dropdown.querySelector('input')?.focus(), 50);
+            
+            // Stop event propagation
+            event.stopPropagation();
+        }}
+        
+        function renderDropdownItems(ingId, search) {{
+            const ing = ingredientData.find(i => i.id === ingId);
+            const searchLower = search.toLowerCase();
+            
+            const filtered = allItems.filter(item => 
+                item.name.toLowerCase().includes(searchLower)
+            );
+            
+            if (filtered.length === 0) {{
+                return '<div class="dropdown-item no-match">No items found</div>';
             }}
             
-            body.innerHTML = html;
-            document.getElementById('match-modal').classList.add('active');
+            return filtered.map(item => {{
+                const icon = item.location === 'inventory' ? '🏠' : 
+                             item.location === 'grocery_list' ? '🛒' : '📦';
+                const isSelected = ing.item_id === item.id;
+                return `
+                    <div class="dropdown-item ${{isSelected ? 'selected' : ''}}" onclick="selectItemMatch(${{ingId}}, ${{item.id}})">
+                        <span class="item-icon">${{icon}}</span>
+                        <span class="item-name">${{item.name}}</span>
+                        ${{isSelected ? '<span style="color: var(--accent);">✓</span>' : ''}}
+                    </div>
+                `;
+            }}).join('');
         }}
         
-        function closeMatchModal() {{
-            document.getElementById('match-modal').classList.remove('active');
+        function filterDropdownItems(ingId, search) {{
+            const container = document.getElementById(`dropdown-items-${{ingId}}`);
+            if (container) {{
+                container.innerHTML = renderDropdownItems(ingId, search);
+            }}
         }}
         
-        async function saveMatches() {{
-            const btn = document.getElementById('save-matches-btn');
-            btn.disabled = true;
-            btn.textContent = 'Saving...';
+        async function selectItemMatch(ingId, itemId) {{
+            const ing = ingredientData.find(i => i.id === ingId);
+            if (!ing) return;
             
-            // Collect all ingredient matches
-            const updatedIngredients = ingredientData.map(ing => {{
-                const select = document.querySelector(`select[data-ingredient-id="${{ing.id}}"]`);
-                const itemId = select && select.value ? parseInt(select.value) : null;
-                return {{
-                    name: ing.name,
-                    amount: ing.amount || null,
-                    unit: ing.unit || null,
-                    notes: ing.notes || null,
-                    item_id: itemId
-                }};
-            }});
+            // Update local data
+            ing.item_id = itemId;
+            
+            // Save to server
+            await saveIngredientMatch(ingId, itemId);
+            
+            closeAllDropdowns();
+        }}
+        
+        async function clearMatch(ingId) {{
+            const ing = ingredientData.find(i => i.id === ingId);
+            if (!ing) return;
+            
+            ing.item_id = null;
+            await saveIngredientMatch(ingId, null);
+            closeAllDropdowns();
+        }}
+        
+        async function saveIngredientMatch(ingId, itemId) {{
+            // Rebuild all ingredients with updated match
+            const updatedIngredients = ingredientData.map(ing => ({{
+                name: ing.name,
+                amount: ing.amount || null,
+                unit: ing.unit || null,
+                notes: ing.notes || null,
+                item_id: ing.item_id
+            }}));
             
             try {{
                 const response = await fetch(`/api/recipes/${{recipeId}}`, {{
@@ -1415,17 +1462,60 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 
                 if (!response.ok) throw new Error('Failed to save');
                 
-                showToast('Ingredient matches saved!');
-                closeMatchModal();
-                
-                // Reload to show updated availability
-                setTimeout(() => location.reload(), 1000);
+                showToast('Match saved!');
+                setTimeout(() => location.reload(), 800);
             }} catch (err) {{
-                showToast('Failed to save matches');
-                btn.disabled = false;
-                btn.textContent = 'Save Matches';
+                showToast('Failed to save match');
             }}
         }}
+        
+        async function addIngredientToGrocery(ingId) {{
+            const ing = ingredientData.find(i => i.id === ingId);
+            if (!ing) return;
+            
+            try {{
+                // Create new item in grocery list
+                const response = await fetch('/api/items', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        name: ing.name,
+                        location: 'grocery_list'
+                    }})
+                }});
+                
+                if (!response.ok) {{
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Failed to add item');
+                }}
+                
+                const newItem = await response.json();
+                
+                // Link this ingredient to the new item
+                ing.item_id = newItem.id;
+                await saveIngredientMatch(ingId, newItem.id);
+                
+                showToast(`Added "${{ing.name}}" to grocery list`);
+                closeAllDropdowns();
+            }} catch (err) {{
+                showToast(err.message);
+            }}
+        }}
+        
+        function closeAllDropdowns() {{
+            document.querySelectorAll('.ingredient-dropdown').forEach(d => {{
+                d.classList.remove('active');
+                d.innerHTML = '';
+            }});
+            activeDropdown = null;
+        }}
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {{
+            if (activeDropdown && !e.target.closest('.ingredient-dropdown') && !e.target.closest('.ingredient-content')) {{
+                closeAllDropdowns();
+            }}
+        }});
         
         function showToast(message) {{
             const toast = document.getElementById('toast');
@@ -1438,3 +1528,4 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
 </html>
 """
     return HTMLResponse(content=html)
+
