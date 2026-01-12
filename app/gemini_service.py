@@ -61,7 +61,7 @@ For each recipe, provide:
 3. Number of servings
 4. Prep time in minutes
 5. Cook time in minutes
-6. List of ingredients with amounts and units
+6. List of ingredients with amounts and units (European standard units)
 7. Step-by-step cooking instructions
 
 IMPORTANT: Respond ONLY with valid JSON in this exact format:
@@ -69,12 +69,12 @@ IMPORTANT: Respond ONLY with valid JSON in this exact format:
   "suggestions": [
     {{
       "name": "Recipe Name",
-      "description": "Brief description of the dish",
+      "description": "Brief description of the dish IN DUTCH",
       "servings": 4,
       "prep_time_minutes": 15,
       "cook_time_minutes": 30,
       "ingredients": [
-        {{"name": "ingredient name", "amount": "2", "unit": "cups", "notes": "diced"}}
+        {{"name": "ingredient name", "amount": "2", "unit": "grams", "notes": "diced"}}
       ],
       "steps": [
         {{"step_number": 1, "instruction": "First step..."}}
@@ -84,7 +84,9 @@ IMPORTANT: Respond ONLY with valid JSON in this exact format:
   "inventory_used": ["item1", "item2"]
 }}
 
-Provide exactly 3 recipe suggestions. Use ingredients from the inventory when possible, but you can suggest additional common pantry items if needed."""
+Every text should be in DUTCH.
+
+Provide exactly 3 recipe suggestions. Use ingredients from the inventory when possible, but you can suggest additional ingredients when required."""
 
     try:
         response = model.generate_content(prompt)

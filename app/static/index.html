@@ -1536,6 +1536,9 @@
                                 </div>
                             </div>
                             <div style="display: flex; gap: 0.5rem; flex-shrink: 0;" onclick="event.stopPropagation();">
+                                <button class="btn btn-sm" onclick="window.location.href='/recipe/${recipe.id}?edit=1'" title="Edit">
+                                    ✏️
+                                </button>
                                 <button class="btn btn-sm" onclick="toggleFavoriteRecipe(${recipe.id})" title="${recipe.is_favorite ? 'Unfavorite' : 'Favorite'}">
                                     ${recipe.is_favorite ? '★' : '☆'}
                                 </button>
@@ -1621,6 +1624,7 @@
                                     </div>
                                 </div>
                                 <div style="display: flex; gap: 0.5rem; flex-shrink: 0;" onclick="event.stopPropagation();">
+                                    <button class="btn btn-sm" onclick="window.location.href='/recipe/${recipe.id}?edit=1'" title="Edit">✏️</button>
                                     <button class="btn btn-sm" onclick="toggleFavoriteRecipe(${recipe.id})" title="Unfavorite">★</button>
                                     <button class="btn btn-sm" onclick="deleteRecipe(${recipe.id}, '${recipe.name.replace(/'/g, "\\'")}')" title="Delete" style="color: var(--accent-red);">🗑</button>
                                 </div>

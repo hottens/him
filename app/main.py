@@ -884,6 +884,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             --accent: #c45c26;
             --accent-green: #3fb950;
             --accent-red: #f85149;
+            --accent-blue: #58a6ff;
             --border: #e5e3df;
         }}
         
@@ -900,6 +901,13 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             padding-bottom: 5rem;
         }}
         
+        .header-row {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }}
+        
         .back-link {{
             display: inline-flex;
             align-items: center;
@@ -907,10 +915,34 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             color: var(--text-muted);
             text-decoration: none;
             font-size: 0.875rem;
-            margin-bottom: 2rem;
         }}
         
         .back-link:hover {{ color: var(--accent); }}
+        
+        .edit-btn {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        
+        .edit-btn:hover {{
+            border-color: var(--accent);
+            color: var(--accent);
+        }}
+        
+        .edit-btn.active {{
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }}
         
         h1 {{
             font-family: 'Crimson Pro', serif;
@@ -1237,56 +1269,373 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             to {{ opacity: 1; transform: translate(-50%, 0); }}
         }}
         
+        /* Edit Mode Styles */
+        .edit-form-group {{
+            margin-bottom: 1rem;
+        }}
+        
+        .edit-label {{
+            display: block;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }}
+        
+        .edit-input, .edit-textarea {{
+            width: 100%;
+            padding: 0.75rem;
+            font-size: 1rem;
+            font-family: inherit;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: #fff;
+            color: var(--text);
+            transition: border-color 0.2s;
+        }}
+        
+        .edit-input:focus, .edit-textarea:focus {{
+            outline: none;
+            border-color: var(--accent);
+        }}
+        
+        .edit-textarea {{
+            min-height: 80px;
+            resize: vertical;
+        }}
+        
+        .edit-input-small {{
+            width: 100px;
+            padding: 0.5rem;
+            font-size: 0.9rem;
+        }}
+        
+        .edit-row {{
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }}
+        
+        .edit-row .edit-form-group {{
+            flex: 1;
+            min-width: 80px;
+        }}
+        
+        .edit-section {{
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }}
+        
+        .edit-section-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }}
+        
+        .edit-section-title {{
+            font-family: 'Crimson Pro', serif;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--accent);
+        }}
+        
+        .add-btn {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.4rem 0.75rem;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }}
+        
+        .add-btn:hover {{
+            opacity: 0.9;
+        }}
+        
+        .edit-item {{
+            display: flex;
+            gap: 0.5rem;
+            align-items: flex-start;
+            padding: 0.75rem;
+            background: var(--bg);
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }}
+        
+        .edit-item-content {{
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }}
+        
+        .edit-item-row {{
+            display: flex;
+            gap: 0.5rem;
+        }}
+        
+        .edit-item-row input {{
+            flex: 1;
+            padding: 0.5rem;
+            font-size: 0.9rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: #fff;
+        }}
+        
+        .edit-item-row input:focus {{
+            outline: none;
+            border-color: var(--accent);
+        }}
+        
+        .edit-item-row input.amount-input {{ max-width: 70px; }}
+        .edit-item-row input.unit-input {{ max-width: 80px; }}
+        
+        .remove-btn {{
+            padding: 0.5rem;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        
+        .remove-btn:hover {{
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }}
+        
+        .step-number {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            background: var(--accent);
+            color: #fff;
+            border-radius: 50%;
+            font-size: 0.85rem;
+            font-weight: 600;
+            flex-shrink: 0;
+        }}
+        
+        .step-textarea {{
+            flex: 1;
+            padding: 0.5rem;
+            font-size: 0.9rem;
+            font-family: inherit;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: #fff;
+            min-height: 60px;
+            resize: vertical;
+        }}
+        
+        .step-textarea:focus {{
+            outline: none;
+            border-color: var(--accent);
+        }}
+        
+        .save-bar {{
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #fff;
+            border-top: 1px solid var(--border);
+            padding: 1rem;
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            z-index: 200;
+            box-shadow: 0 -4px 12px rgba(0,0,0,0.1);
+        }}
+        
+        .save-bar button {{
+            padding: 0.75rem 2rem;
+            font-size: 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        
+        .cancel-btn {{
+            background: #fff;
+            border: 1px solid var(--border);
+            color: var(--text);
+        }}
+        
+        .cancel-btn:hover {{
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }}
+        
+        .save-btn {{
+            background: var(--accent-green);
+            border: none;
+            color: #fff;
+        }}
+        
+        .save-btn:hover {{
+            opacity: 0.9;
+        }}
+        
+        .save-btn:disabled {{
+            opacity: 0.5;
+            cursor: not-allowed;
+        }}
+        
+        /* View mode hidden when editing */
+        .view-mode {{ display: block; }}
+        .edit-mode {{ display: none; }}
+        
+        body.editing .view-mode {{ display: none; }}
+        body.editing .edit-mode {{ display: block; }}
+        body.editing .favorite {{ display: none; }}
+        
+        .delete-recipe-btn {{
+            background: transparent;
+            border: 1px solid var(--accent-red);
+            color: var(--accent-red);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 1rem;
+        }}
+        
+        .delete-recipe-btn:hover {{
+            background: var(--accent-red);
+            color: #fff;
+        }}
+        
         @media (max-width: 480px) {{
             h1 {{ font-size: 2rem; }}
             .meta {{ gap: 1rem; flex-wrap: wrap; }}
             .availability-banner {{ flex-direction: column; align-items: stretch; text-align: center; }}
+            .edit-row {{ flex-direction: column; }}
+            .edit-item-row {{ flex-wrap: wrap; }}
         }}
     </style>
 </head>
 <body>
-    <a href="/" class="back-link">← Back to Inventory</a>
+    <div class="header-row">
+        <a href="/" class="back-link">← Back to Inventory</a>
+        <button class="edit-btn" onclick="toggleEditMode()" id="edit-toggle-btn">
+            ✏️ Edit
+        </button>
+    </div>
     
-    <h1>{recipe.name}</h1>
-    
-    {'<p class="description">' + recipe.description + '</p>' if recipe.description else ''}
-    
-    <div class="meta">
-        <div class="meta-item">
-            <span class="meta-label">Servings</span>
-            <span class="meta-value">{recipe.servings}</span>
+    <!-- VIEW MODE -->
+    <div class="view-mode">
+        <h1>{recipe.name}</h1>
+        
+        {'<p class="description">' + recipe.description + '</p>' if recipe.description else ''}
+        
+        <div class="meta">
+            <div class="meta-item">
+                <span class="meta-label">Servings</span>
+                <span class="meta-value">{recipe.servings}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Prep</span>
+                <span class="meta-value">{recipe.prep_time_minutes or '—'} min</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Cook</span>
+                <span class="meta-value">{recipe.cook_time_minutes or '—'} min</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Total</span>
+                <span class="meta-value">{time_str}</span>
+            </div>
         </div>
-        <div class="meta-item">
-            <span class="meta-label">Prep</span>
-            <span class="meta-value">{recipe.prep_time_minutes or '—'} min</span>
+        
+        <h2>Ingredients</h2>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">Click an ingredient to link it to an inventory item</p>
+        {availability_html}
+        <div class="ingredients">
+            <ul>
+                {ingredients_html}
+            </ul>
         </div>
-        <div class="meta-item">
-            <span class="meta-label">Cook</span>
-            <span class="meta-value">{recipe.cook_time_minutes or '—'} min</span>
-        </div>
-        <div class="meta-item">
-            <span class="meta-label">Total</span>
-            <span class="meta-value">{time_str}</span>
+        
+        <h2>Instructions</h2>
+        <div class="steps">
+            <ol>
+                {steps_html}
+            </ol>
         </div>
     </div>
     
-    <h2>Ingredients</h2>
-    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">Click an ingredient to link it to an inventory item</p>
-    {availability_html}
-    <div class="ingredients">
-        <ul>
-            {ingredients_html}
-        </ul>
+    <!-- EDIT MODE -->
+    <div class="edit-mode">
+        <div class="edit-section">
+            <div class="edit-section-title">Recipe Details</div>
+            
+            <div class="edit-form-group">
+                <label class="edit-label">Name</label>
+                <input type="text" class="edit-input" id="edit-name" value="{recipe.name}">
+            </div>
+            
+            <div class="edit-form-group">
+                <label class="edit-label">Description</label>
+                <textarea class="edit-textarea" id="edit-description">{recipe.description or ''}</textarea>
+            </div>
+            
+            <div class="edit-row">
+                <div class="edit-form-group">
+                    <label class="edit-label">Servings</label>
+                    <input type="number" class="edit-input edit-input-small" id="edit-servings" value="{recipe.servings}">
+                </div>
+                <div class="edit-form-group">
+                    <label class="edit-label">Prep (min)</label>
+                    <input type="number" class="edit-input edit-input-small" id="edit-prep" value="{recipe.prep_time_minutes or ''}">
+                </div>
+                <div class="edit-form-group">
+                    <label class="edit-label">Cook (min)</label>
+                    <input type="number" class="edit-input edit-input-small" id="edit-cook" value="{recipe.cook_time_minutes or ''}">
+                </div>
+            </div>
+        </div>
+        
+        <div class="edit-section">
+            <div class="edit-section-header">
+                <div class="edit-section-title">Ingredients</div>
+                <button class="add-btn" onclick="addIngredient()">+ Add</button>
+            </div>
+            <div id="edit-ingredients-list"></div>
+        </div>
+        
+        <div class="edit-section">
+            <div class="edit-section-header">
+                <div class="edit-section-title">Instructions</div>
+                <button class="add-btn" onclick="addStep()">+ Add Step</button>
+            </div>
+            <div id="edit-steps-list"></div>
+        </div>
+        
+        <button class="delete-recipe-btn" onclick="deleteRecipe()">🗑 Delete Recipe</button>
+        
+        <div class="save-bar">
+            <button class="cancel-btn" onclick="cancelEdit()">Cancel</button>
+            <button class="save-btn" onclick="saveRecipe()" id="save-btn">Save Changes</button>
+        </div>
     </div>
     
-    <h2>Instructions</h2>
-    <div class="steps">
-        <ol>
-            {steps_html}
-        </ol>
-    </div>
-    
-    <button class="favorite" onclick="toggleFavorite()" title="{'Remove from favorites' if recipe.is_favorite else 'Add to favorites'}">
+    <button class="favorite view-mode" onclick="toggleFavorite()" title="{'Remove from favorites' if recipe.is_favorite else 'Add to favorites'}">
         {'★' if recipe.is_favorite else '☆'}
     </button>
     
@@ -1297,6 +1646,201 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         const ingredientData = {ingredients_json};
         const allItems = {items_json};
         const recipeId = {recipe.id};
+        
+        // Edit mode state
+        let editIngredients = JSON.parse(JSON.stringify(ingredientData));
+        let editSteps = {json.dumps([{"step_number": s.step_number, "instruction": s.instruction} for s in sorted_steps])};
+        
+        function toggleEditMode() {{
+            const body = document.body;
+            const btn = document.getElementById('edit-toggle-btn');
+            
+            if (body.classList.contains('editing')) {{
+                body.classList.remove('editing');
+                btn.textContent = '✏️ Edit';
+                btn.classList.remove('active');
+            }} else {{
+                body.classList.add('editing');
+                btn.textContent = '✏️ Editing';
+                btn.classList.add('active');
+                renderEditIngredients();
+                renderEditSteps();
+            }}
+        }}
+        
+        function cancelEdit() {{
+            // Reset to original data
+            editIngredients = JSON.parse(JSON.stringify(ingredientData));
+            editSteps = {json.dumps([{"step_number": s.step_number, "instruction": s.instruction} for s in sorted_steps])};
+            document.body.classList.remove('editing');
+            document.getElementById('edit-toggle-btn').textContent = '✏️ Edit';
+            document.getElementById('edit-toggle-btn').classList.remove('active');
+        }}
+        
+        function renderEditIngredients() {{
+            const container = document.getElementById('edit-ingredients-list');
+            if (editIngredients.length === 0) {{
+                container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">No ingredients yet. Click "Add" to add one.</p>';
+                return;
+            }}
+            
+            container.innerHTML = editIngredients.map((ing, idx) => `
+                <div class="edit-item" data-idx="${{idx}}">
+                    <div class="edit-item-content">
+                        <div class="edit-item-row">
+                            <input type="text" class="amount-input" placeholder="Amt" value="${{ing.amount || ''}}" onchange="updateIngredient(${{idx}}, 'amount', this.value)">
+                            <input type="text" class="unit-input" placeholder="Unit" value="${{ing.unit || ''}}" onchange="updateIngredient(${{idx}}, 'unit', this.value)">
+                            <input type="text" placeholder="Ingredient name" value="${{ing.name}}" onchange="updateIngredient(${{idx}}, 'name', this.value)">
+                        </div>
+                        <div class="edit-item-row">
+                            <input type="text" placeholder="Notes (optional)" value="${{ing.notes || ''}}" onchange="updateIngredient(${{idx}}, 'notes', this.value)" style="flex: 1;">
+                        </div>
+                    </div>
+                    <button class="remove-btn" onclick="removeIngredient(${{idx}})" title="Remove">✕</button>
+                </div>
+            `).join('');
+        }}
+        
+        function updateIngredient(idx, field, value) {{
+            editIngredients[idx][field] = value;
+        }}
+        
+        function addIngredient() {{
+            editIngredients.push({{
+                name: '',
+                amount: '',
+                unit: '',
+                notes: '',
+                item_id: null
+            }});
+            renderEditIngredients();
+        }}
+        
+        function removeIngredient(idx) {{
+            editIngredients.splice(idx, 1);
+            renderEditIngredients();
+        }}
+        
+        function renderEditSteps() {{
+            const container = document.getElementById('edit-steps-list');
+            if (editSteps.length === 0) {{
+                container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">No steps yet. Click "Add Step" to add one.</p>';
+                return;
+            }}
+            
+            container.innerHTML = editSteps.map((step, idx) => `
+                <div class="edit-item" data-idx="${{idx}}">
+                    <span class="step-number">${{idx + 1}}</span>
+                    <textarea class="step-textarea" placeholder="Describe this step..." onchange="updateStep(${{idx}}, this.value)">${{step.instruction}}</textarea>
+                    <button class="remove-btn" onclick="removeStep(${{idx}})" title="Remove">✕</button>
+                </div>
+            `).join('');
+        }}
+        
+        function updateStep(idx, value) {{
+            editSteps[idx].instruction = value;
+        }}
+        
+        function addStep() {{
+            editSteps.push({{
+                step_number: editSteps.length + 1,
+                instruction: ''
+            }});
+            renderEditSteps();
+        }}
+        
+        function removeStep(idx) {{
+            editSteps.splice(idx, 1);
+            // Renumber steps
+            editSteps.forEach((step, i) => step.step_number = i + 1);
+            renderEditSteps();
+        }}
+        
+        async function saveRecipe() {{
+            const saveBtn = document.getElementById('save-btn');
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+            
+            // Gather form data
+            const name = document.getElementById('edit-name').value.trim();
+            const description = document.getElementById('edit-description').value.trim();
+            const servings = parseInt(document.getElementById('edit-servings').value) || 4;
+            const prepTime = parseInt(document.getElementById('edit-prep').value) || null;
+            const cookTime = parseInt(document.getElementById('edit-cook').value) || null;
+            
+            if (!name) {{
+                showToast('Recipe name is required');
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Changes';
+                return;
+            }}
+            
+            // Filter out empty ingredients
+            const ingredients = editIngredients
+                .filter(ing => ing.name.trim())
+                .map(ing => ({{
+                    name: ing.name.trim(),
+                    amount: ing.amount || null,
+                    unit: ing.unit || null,
+                    notes: ing.notes || null,
+                    item_id: ing.item_id || null
+                }}));
+            
+            // Filter out empty steps and renumber
+            const steps = editSteps
+                .filter(step => step.instruction.trim())
+                .map((step, idx) => ({{
+                    step_number: idx + 1,
+                    instruction: step.instruction.trim()
+                }}));
+            
+            try {{
+                const response = await fetch(`/api/recipes/${{recipeId}}`, {{
+                    method: 'PUT',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        name,
+                        description: description || null,
+                        servings,
+                        prep_time_minutes: prepTime,
+                        cook_time_minutes: cookTime,
+                        ingredients,
+                        steps
+                    }})
+                }});
+                
+                if (!response.ok) {{
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Failed to save');
+                }}
+                
+                showToast('Recipe saved!');
+                setTimeout(() => location.reload(), 800);
+            }} catch (err) {{
+                showToast(err.message);
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Changes';
+            }}
+        }}
+        
+        async function deleteRecipe() {{
+            if (!confirm('Are you sure you want to delete this recipe? This cannot be undone.')) {{
+                return;
+            }}
+            
+            try {{
+                const response = await fetch(`/api/recipes/${{recipeId}}`, {{
+                    method: 'DELETE'
+                }});
+                
+                if (!response.ok) throw new Error('Failed to delete');
+                
+                showToast('Recipe deleted');
+                setTimeout(() => window.location.href = '/', 800);
+            }} catch (err) {{
+                showToast('Failed to delete recipe');
+            }}
+        }}
         
         async function toggleFavorite() {{
             await fetch('/api/recipes/{recipe.id}/favorite', {{ method: 'POST' }});
@@ -1522,6 +2066,13 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             toast.textContent = message;
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 3000);
+        }}
+        
+        // Check if we should auto-enter edit mode (from ?edit=1 query param)
+        if (new URLSearchParams(window.location.search).get('edit') === '1') {{
+            toggleEditMode();
+            // Clean up URL
+            window.history.replaceState({{}}, '', window.location.pathname);
         }}
     </script>
 </body>
