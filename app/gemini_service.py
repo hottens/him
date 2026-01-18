@@ -50,11 +50,15 @@ Focus on recipes that match this request. For example:
     else:
         query_instruction = ""
     
-    prompt = f"""You are a helpful cooking assistant. Based on the following inventory items, suggest 3 recipes that can be made.
+    prompt = f"""You are a helpful cooking assistant. Based on the following inventory items, suggest 3 recipes for 4 servings that can be made.
 
 INVENTORY ITEMS:
 {inventory_str}
 {query_instruction}
+COOKING EQUIPMENT:
+Assume a standard home kitchen with the following equipment:
+    oven, stove, blender, pots, pans, utensils, airfryer, mortar, cake pan, tosti machine, toaster
+    
 For each recipe, provide:
 1. A creative but descriptive name
 2. A brief description (1-2 sentences)
