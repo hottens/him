@@ -275,11 +275,13 @@ def parse_spoonacular_recipe(spoonacular_data: dict) -> dict:
     """
     Use Gemini to parse a Spoonacular recipe into our clean local format.
     
+    Translates the recipe to Dutch and converts units to European metric units.
+    
     Args:
         spoonacular_data: Raw recipe data from Spoonacular API
     
     Returns:
-        Dict containing parsed recipe in our format
+        Dict containing parsed recipe in our format (in Dutch with metric units)
     """
     model = get_model()
     
@@ -308,7 +310,8 @@ def parse_spoonacular_recipe(spoonacular_data: dict) -> dict:
     else:
         steps_text = instructions or "No instructions provided."
     
-    prompt = f"""Parse this recipe into a clean, structured format.
+    prompt = f"""Parse this recipe into a clean, structured format. 
+IMPORTANT: Translate EVERYTHING to Dutch and convert ALL measurements to European metric units.
 
 RECIPE: {title}
 
@@ -324,32 +327,45 @@ INSTRUCTIONS:
 COOKING TIME: {ready_in_minutes} minutes total
 SERVINGS: {servings}
 
-Parse this into our structured format. For ingredients:
-- Extract the ingredient name (just the food item, no amounts or preparation)
-- Extract the amount as a string
-- Extract the unit (cups, tbsp, oz, etc.)
-- Add any preparation notes (diced, chopped, etc.)
+TRANSLATION AND CONVERSION REQUIREMENTS:
+1. Translate the recipe name, description, ingredient names, notes, and all instructions to DUTCH
+2. Convert ALL units to European metric:
+   - cups → ml or gram (1 cup = 240ml for liquids, weight in grams for solids)
+   - oz → gram (1 oz = 28g)
+   - lb → gram or kg (1 lb = 454g)
+   - tbsp → ml or eetlepel (1 tbsp = 15ml)
+   - tsp → ml or theelepel (1 tsp = 5ml)
+   - fl oz → ml (1 fl oz = 30ml)
+   - inches → cm
+   - Fahrenheit → Celsius (°C = (°F - 32) × 5/9)
+3. Use Dutch cooking terms (e.g., "fry" → "bakken", "bake" → "bakken in de oven")
+
+For ingredients:
+- Translate the ingredient name to Dutch
+- Convert and round amounts to practical metric values
+- Use metric units (gram, ml, stuks, eetlepel, theelepel)
+- Translate preparation notes to Dutch (e.g., "diced" → "in blokjes")
 
 For steps:
-- Break down into clear, numbered steps
-- Each step should be a single action
+- Translate each step to Dutch
+- Convert any temperatures or measurements in the instructions
 
 IMPORTANT: Respond ONLY with valid JSON in this exact format:
 {{
-  "name": "{title}",
-  "description": "A brief 1-2 sentence description of the dish",
+  "name": "Dutch recipe name",
+  "description": "Een korte beschrijving van het gerecht in het Nederlands",
   "servings": {servings},
   "prep_time_minutes": null,
   "cook_time_minutes": {ready_in_minutes or 'null'},
   "ingredients": [
-    {{"name": "ingredient name only", "amount": "20", "unit": "grams", "notes": "diced"}}
+    {{"name": "Nederlandse ingrediëntnaam", "amount": "200", "unit": "gram", "notes": "in blokjes"}}
   ],
   "steps": [
-    {{"step_number": 1, "instruction": "Clear instruction..."}}
+    {{"step_number": 1, "instruction": "Nederlandse instructie..."}}
   ]
 }}
 
-Make the description appetizing but concise. Ensure all ingredients are parsed correctly."""
+Make the description appetizing in Dutch. Ensure all ingredients are parsed and converted correctly."""
 
     try:
         response = model.generate_content(prompt)

@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import os
 
+from sqlalchemy import text
+
 from .database import engine, get_db, Base
 from .models import Item, Barcode, ItemLocation, Recipe, RecipeIngredient, RecipeStep
 from . import schemas
@@ -20,6 +22,20 @@ from . import spoonacular_service
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
+
+# Run migrations for new columns (SQLAlchemy create_all doesn't add columns to existing tables)
+def run_migrations():
+    """Add new columns to existing tables if they don't exist."""
+    with engine.connect() as conn:
+        # Check and add source_url column to recipes table
+        result = conn.execute(text("PRAGMA table_info(recipes)"))
+        columns = [row[1] for row in result.fetchall()]
+        
+        if "source_url" not in columns:
+            conn.execute(text("ALTER TABLE recipes ADD COLUMN source_url VARCHAR"))
+            conn.commit()
+
+run_migrations()
 
 app = FastAPI(
     title="Home Inventory Manager",
@@ -661,6 +677,7 @@ async def import_spoonacular_recipe(recipe_id: int, db: Session = Depends(get_db
         servings=local_data.get("servings", 4),
         prep_time_minutes=local_data.get("prep_time_minutes"),
         cook_time_minutes=local_data.get("cook_time_minutes"),
+        source_url=local_data.get("source_url") or spoon_recipe.get("sourceUrl"),
         is_favorite=False
     )
     db.add(db_recipe)
@@ -733,6 +750,7 @@ async def import_recipe_from_url(request: ImportUrlRequest, db: Session = Depend
         servings=local_data.get("servings", 4),
         prep_time_minutes=local_data.get("prep_time_minutes"),
         cook_time_minutes=local_data.get("cook_time_minutes"),
+        source_url=local_data.get("source_url") or request.url,
         is_favorite=False
     )
     db.add(db_recipe)
@@ -1521,6 +1539,28 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             color: #fff;
         }}
         
+        .source-link {{
+            margin-top: 2rem;
+            padding: 1rem;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            text-align: center;
+        }}
+        
+        .source-link a {{
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: opacity 0.2s;
+        }}
+        
+        .source-link a:hover {{
+            opacity: 0.8;
+            text-decoration: underline;
+        }}
+        
         @media (max-width: 480px) {{
             h1 {{ font-size: 2rem; }}
             .meta {{ gap: 1rem; flex-wrap: wrap; }}
@@ -1578,6 +1618,8 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 {steps_html}
             </ol>
         </div>
+        
+        {'<div class="source-link"><a href="' + recipe.source_url + '" target="_blank" rel="noopener noreferrer">📎 View original recipe →</a></div>' if recipe.source_url else ''}
     </div>
     
     <!-- EDIT MODE -->

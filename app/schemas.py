@@ -143,6 +143,7 @@ class RecipeBase(BaseModel):
     servings: int = 4
     prep_time_minutes: Optional[int] = None
     cook_time_minutes: Optional[int] = None
+    source_url: Optional[str] = None
 
 
 class RecipeCreate(RecipeBase):
@@ -169,6 +170,7 @@ class RecipeUpdate(BaseModel):
     prep_time_minutes: Optional[int] = None
     cook_time_minutes: Optional[int] = None
     is_favorite: Optional[bool] = None
+    source_url: Optional[str] = None
 
 
 class RecipeListResponse(BaseModel):
@@ -226,5 +228,6 @@ class RecipeFullUpdate(BaseModel):
     prep_time_minutes: Optional[int] = None
     cook_time_minutes: Optional[int] = None
     is_favorite: Optional[bool] = None
+    source_url: Optional[str] = None
     ingredients: Optional[list[RecipeIngredientCreate]] = None
     steps: Optional[list[RecipeStepCreate]] = None

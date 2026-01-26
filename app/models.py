@@ -70,6 +70,7 @@ class Recipe(Base):
     prep_time_minutes = Column(Integer, nullable=True)
     cook_time_minutes = Column(Integer, nullable=True)
     is_favorite = Column(Boolean, default=False)
+    source_url = Column(String, nullable=True)  # Original source URL of the recipe
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # One-to-many: one recipe has multiple ingredients
