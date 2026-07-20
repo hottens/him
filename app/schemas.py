@@ -39,6 +39,12 @@ class ItemResponse(ItemBase):
     id: int
     location: ItemLocation
     barcodes: list[BarcodeResponse] = []
+    # Product info enriched from Open Food Facts (inventory scans only)
+    category: Optional[str] = None
+    nutri_score: Optional[str] = None
+    nutriments: Optional[str] = None
+    ingredients_text: Optional[str] = None
+    allergens: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -71,6 +77,28 @@ class AssociateBarcodeRequest(BaseModel):
     """Request to associate a barcode with an existing item."""
     barcode: str
     item_id: int
+
+
+# --- Scan Request/Response ---
+
+class ScanRequest(BaseModel):
+    """Request to process a scanned barcode for a given target location."""
+    code: str
+    location: ItemLocation = ItemLocation.INVENTORY
+
+
+class ScanResponse(BaseModel):
+    """
+    Result of processing a scanned barcode.
+
+    - ``found``: the barcode was already known and its item was moved.
+    - ``created``: a new item was auto-created from Open Food Facts data.
+    - ``needs_manual``: the frontend should prompt the user to name the item.
+    """
+    found: bool = False
+    created: bool = False
+    needs_manual: bool = False
+    item: Optional[ItemResponse] = None
 
 
 # --- Home Assistant Compatible Responses ---

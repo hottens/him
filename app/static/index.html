@@ -914,6 +914,7 @@
         let allItems = [];
         let allRecipes = [];
         let inventoryNames = new Set();
+        let inventoryItemIds = new Set();
         let recipeSearchQuery = '';
         let favFilterActive = false;
         // API base URL
@@ -956,6 +957,12 @@
                 recipeSearchQuery = e.target.value.trim().toLowerCase();
                 renderRecipes();
             });
+
+            // Restore the requested tab (e.g. returning from a recipe page)
+            const requestedTab = new URLSearchParams(window.location.search).get('tab');
+            if (requestedTab === 'recipes') {
+                switchPanel('recipes');
+            }
 
             // Load initial data
             loadInventory();
@@ -1085,23 +1092,34 @@
             resultDiv.className = 'scanner-result';
 
             try {
-                const response = await fetch(`${API_BASE}/barcode/${encodeURIComponent(code)}`);
+                const response = await fetch(`${API_BASE}/scan`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, location: currentScanMode })
+                });
                 const data = await response.json();
+                const targetLabel = currentScanMode === 'inventory' ? 'Voorraad' : 'Boodschappenlijst';
 
-                if (data.found) {
-                    resultDiv.innerHTML = `✓ Gevonden: <strong>${data.item.name}</strong>`;
-                    resultDiv.className = 'scanner-result success';
-                    
-                    await moveItem(data.item.id, currentScanMode);
-                    showToast(`${data.item.name} → ${currentScanMode === 'inventory' ? 'Voorraad' : 'Boodschappenlijst'}`, 'success');
-                    
-                    loadInventory();
-                    loadGrocery();
-                } else {
+                if (data.needs_manual) {
                     resultDiv.innerHTML = `⚠ Nieuwe barcode: <strong>${code}</strong>`;
                     resultDiv.className = 'scanner-result new';
                     showNewItemModal(code);
+                    return;
                 }
+
+                const item = data.item;
+                const nutri = item.nutri_score ? ` · Nutri-Score ${item.nutri_score}` : '';
+                if (data.created) {
+                    resultDiv.innerHTML = `✨ Toegevoegd via Open Food Facts: <strong>${item.name}</strong>${nutri}`;
+                } else {
+                    resultDiv.innerHTML = `✓ Gevonden: <strong>${item.name}</strong>${nutri}`;
+                }
+                resultDiv.className = 'scanner-result success';
+                showToast(`${item.name} → ${targetLabel}`, 'success');
+
+                loadInventory();
+                loadGrocery();
+                loadAllItems();
             } catch (err) {
                 resultDiv.textContent = `Fout: ${err.message}`;
                 showToast('Barcode opzoeken mislukt', 'error');
@@ -1319,8 +1337,9 @@
                 document.getElementById('inventory-count').textContent = data.count;
                 updateItemsCount();
 
-                // Keep inventory names for recipe availability calculations
+                // Keep inventory names + ids for recipe availability calculations
                 inventoryNames = new Set(data.items.map(item => item.name.toLowerCase()));
+                inventoryItemIds = new Set(data.items.map(item => item.id));
                 renderRecipes();
                 
                 const listDiv = document.getElementById('inventory-list');
@@ -1365,11 +1384,19 @@
 
         function renderItemCard(item, currentList) {
             const barcodes = item.barcodes.map(b => b.code).join(', ');
-            
+
+            const meta = [];
+            if (item.nutri_score) meta.push(`Nutri-Score ${item.nutri_score}`);
+            if (item.allergens) meta.push(`⚠ ${item.allergens}`);
+            const metaHtml = meta.length
+                ? `<div class="item-barcodes">${meta.join(' · ')}</div>`
+                : '';
+
             return `
                 <div class="item-card">
                     <div class="item-info" onclick="openEditItemModal(${item.id}, '${item.name.replace(/'/g, "\\'")}', '${item.location}')" style="cursor: pointer;">
                         <div class="item-name">${item.name}</div>
+                        ${metaHtml}
                         ${barcodes ? `<div class="item-barcodes">${barcodes}</div>` : ''}
                     </div>
                     <div class="item-actions">
@@ -1398,12 +1425,15 @@
             }
         }
 
-        // Compute how many ingredients are available in inventory
+        // Compute how many ingredients are available in inventory.
+        // Mirror the recipe detail page: prefer the linked item_id, fall back to name.
         function recipeAvailability(recipe) {
             const ingredients = recipe.ingredients || [];
             const total = ingredients.length;
             const available = ingredients.filter(ing =>
-                inventoryNames.has(ing.name.toLowerCase())
+                ing.item_id
+                    ? inventoryItemIds.has(ing.item_id)
+                    : inventoryNames.has(ing.name.toLowerCase())
             ).length;
             const percentage = total > 0 ? available / total : 0;
             return { total, available, percentage };

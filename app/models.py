@@ -31,6 +31,13 @@ class Item(Base):
         nullable=False
     )
 
+    # Product info enriched from Open Food Facts on inventory scans
+    category = Column(String, nullable=True)
+    nutri_score = Column(String, nullable=True)       # A-E grade
+    nutriments = Column(Text, nullable=True)          # JSON blob of nutritional values
+    ingredients_text = Column(Text, nullable=True)
+    allergens = Column(Text, nullable=True)
+
     # One-to-many: one item can have multiple barcodes
     barcodes = relationship("Barcode", back_populates="item", cascade="all, delete-orphan")
 
