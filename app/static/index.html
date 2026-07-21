@@ -1271,40 +1271,32 @@
         async function lookupBarcode(code) {
             const resultDiv = document.getElementById('scanner-result');
             resultDiv.style.display = 'block';
-            resultDiv.textContent = `Opzoeken: ${code}...`;
+            resultDiv.textContent = `Looking up: ${code}...`;
             resultDiv.className = 'scanner-result';
 
             try {
-                const response = await fetch(`${API_BASE}/scan`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ code, location: currentScanMode })
-                });
+                const response = await fetch(`${API_BASE}/barcode/${encodeURIComponent(code)}`);
                 const data = await response.json();
-                const targetLabel = currentScanMode === 'inventory' ? 'Voorraad' : 'Boodschappenlijst';
+                const targetLabel = currentScanMode === 'inventory' ? 'Inventory' : 'Grocery List';
 
-                if (data.needs_manual) {
-                    resultDiv.innerHTML = `⚠ Nieuwe barcode: <strong>${code}</strong>`;
+                if (data.found) {
+                    resultDiv.innerHTML = `✓ Found: <strong>${data.item.name}</strong>`;
+                    resultDiv.className = 'scanner-result success';
+
+                    await moveItem(data.item.id, currentScanMode);
+                    showToast(`${data.item.name} → ${targetLabel}`, 'success');
+
+                    loadInventory();
+                    loadGrocery();
+                    loadAllItems();
+                } else {
+                    resultDiv.innerHTML = `⚠ New barcode: <strong>${code}</strong>`;
                     resultDiv.className = 'scanner-result new';
                     showNewItemModal(code, data.suggested_name, data.suggested_brands);
                 }
-
-                const item = data.item;
-                const nutri = item.nutri_score ? ` · Nutri-Score ${item.nutri_score}` : '';
-                if (data.created) {
-                    resultDiv.innerHTML = `✨ Toegevoegd via Open Food Facts: <strong>${item.name}</strong>${nutri}`;
-                } else {
-                    resultDiv.innerHTML = `✓ Gevonden: <strong>${item.name}</strong>${nutri}`;
-                }
-                resultDiv.className = 'scanner-result success';
-                showToast(`${item.name} → ${targetLabel}`, 'success');
-
-                loadInventory();
-                loadGrocery();
-                loadAllItems();
             } catch (err) {
-                resultDiv.textContent = `Fout: ${err.message}`;
-                showToast('Barcode opzoeken mislukt', 'error');
+                resultDiv.textContent = `Error: ${err.message}`;
+                showToast('Failed to look up barcode', 'error');
             }
         }
 

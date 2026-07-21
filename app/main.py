@@ -59,15 +59,6 @@ def run_migrations():
         conn.commit()
 
 
-        # Add Open Food Facts product info columns to items table
-        result = conn.execute(text("PRAGMA table_info(items)"))
-        item_columns = [row[1] for row in result.fetchall()]
-
-        for column in ("category", "nutri_score", "nutriments", "ingredients_text", "allergens"):
-            if column not in item_columns:
-                conn.execute(text(f"ALTER TABLE items ADD COLUMN {column} VARCHAR"))
-        conn.commit()
-
 run_migrations()
 
 app = FastAPI(
@@ -227,70 +218,6 @@ async def fetch_barcode_product(barcode_id: int, db: Session = Depends(get_db)):
     db.refresh(barcode)
     active_id = barcode.item.active_barcode_id if barcode.item else None
     return serialize_barcode(barcode, active_id)
-
-
-# --- Barcode Scan (with Open Food Facts enrichment) ---
-
-def _apply_off_info(item: Item, info: dict) -> None:
-    """Fill missing product-info fields on an item from Open Food Facts data."""
-    if not item.category and info.get("category"):
-        item.category = info["category"]
-    if not item.nutri_score and info.get("nutri_score"):
-        item.nutri_score = info["nutri_score"]
-    if not item.nutriments and info.get("nutriments"):
-        item.nutriments = json.dumps(info["nutriments"])
-    if not item.ingredients_text and info.get("ingredients_text"):
-        item.ingredients_text = info["ingredients_text"]
-    if not item.allergens and info.get("allergens"):
-        item.allergens = info["allergens"]
-
-
-@app.post("/api/scan", response_model=schemas.ScanResponse)
-async def scan_barcode(request: schemas.ScanRequest, db: Session = Depends(get_db)):
-    """
-    Process a scanned barcode for a target location.
-
-    Known barcodes are moved to the requested location. For inventory scans we
-    query Open Food Facts to enrich the item (category-as-name plus nutritional
-    values, nutri-score, ingredients and allergens). Grocery scans of unknown
-    barcodes are left to the manual naming flow.
-    """
-    code = request.code
-    location = request.location
-
-    barcode = db.query(Barcode).filter(Barcode.code == code).first()
-    if barcode:
-        item = barcode.item
-        item.location = location
-        # Enrich inventory items lacking product info
-        if location == ItemLocation.INVENTORY and not item.category:
-            info = openfoodfacts_service.lookup_product(code)
-            if info:
-                _apply_off_info(item, info)
-        db.commit()
-        db.refresh(item)
-        return schemas.ScanResponse(found=True, item=item)
-
-    # Unknown barcode: only inventory scans get auto-created from Open Food Facts
-    if location == ItemLocation.INVENTORY:
-        info = openfoodfacts_service.lookup_product(code)
-        if info and info.get("name"):
-            # Category is used as the name; group under an existing item if the
-            # name already exists (Item.name is unique).
-            item = db.query(Item).filter(Item.name == info["name"]).first()
-            if item:
-                item.location = ItemLocation.INVENTORY
-            else:
-                item = Item(name=info["name"], location=ItemLocation.INVENTORY)
-                db.add(item)
-                db.flush()
-            _apply_off_info(item, info)
-            db.add(Barcode(code=code, item_id=item.id))
-            db.commit()
-            db.refresh(item)
-            return schemas.ScanResponse(found=False, created=True, item=item)
-
-    return schemas.ScanResponse(found=False, needs_manual=True)
 
 
 # --- Item Endpoints ---
