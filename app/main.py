@@ -13,9 +13,7 @@ from typing import Optional
 import json
 import os
 
-from sqlalchemy import text
-
-from .database import engine, get_db, Base
+from .database import engine, get_db, Base, init_db
 from .models import Item, Barcode, ItemLocation, Recipe, RecipeIngredient, RecipeStep
 from . import schemas
 from . import gemini_service
@@ -24,42 +22,8 @@ from . import product_data
 from . import openfoodfacts_service
 from .serializers import serialize_item, serialize_recipe, serialize_barcode, recipe_nutrition_summary
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
-
-
-def _add_column_if_missing(conn, table: str, column: str, col_type: str) -> None:
-    result = conn.execute(text(f"PRAGMA table_info({table})"))
-    columns = [row[1] for row in result.fetchall()]
-    if column not in columns:
-        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
-
-
-def run_migrations():
-    """Add new columns to existing tables if they don't exist."""
-    with engine.connect() as conn:
-        _add_column_if_missing(conn, "recipes", "source_url", "VARCHAR")
-        _add_column_if_missing(conn, "items", "active_barcode_id", "INTEGER")
-        for col, typ in [
-            ("product_name", "VARCHAR"),
-            ("brands", "VARCHAR"),
-            ("keywords", "TEXT"),
-            ("ingredients_en", "TEXT"),
-            ("ingredients_hierarchy_en", "TEXT"),
-            ("ingredients_nl", "TEXT"),
-            ("ingredients_hierarchy_nl", "TEXT"),
-            ("allergens", "TEXT"),
-            ("nutriments", "TEXT"),
-            ("energy_kcal_100g", "FLOAT"),
-            ("energy_kcal_serving", "FLOAT"),
-            ("last_scanned_at", "DATETIME"),
-            ("product_fetched_at", "DATETIME"),
-        ]:
-            _add_column_if_missing(conn, "barcodes", col, typ)
-        conn.commit()
-
-
-run_migrations()
+# Create missing tables + apply additive migrations (safe for existing data)
+init_db(engine)
 
 app = FastAPI(
     title="Home Inventory Manager",

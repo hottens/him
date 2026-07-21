@@ -93,6 +93,17 @@ Home Assistant endpoints (`/api/inventory`, `/api/grocery`) are unchanged in sha
 - SQLite at `/data/inventory.db` (Docker volume `home_inventory_data`)
 - Backup: `docker cp home-inventory:/data/inventory.db ./backup.db`
 
+### Schema migrations
+
+On startup the app:
+
+1. Creates any **missing tables** via SQLAlchemy (`create_all` — never alters existing tables)
+2. Runs **versioned migrations** in `app/migrations/versions/` (recorded in `schema_migrations`)
+
+Migrations are additive only (`ADD COLUMN` nullable / `CREATE TABLE IF NOT EXISTS`). Existing rows stay intact; new columns default to `NULL`. Already-applied versions are skipped.
+
+To add a schema change: create `app/migrations/versions/00N_short_name.py` with `VERSION` + `upgrade(conn)`, using helpers from `app/migrations/helpers.py`.
+
 ## Development
 
 ```bash
