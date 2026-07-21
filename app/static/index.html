@@ -854,10 +854,41 @@
             margin-left: 0.5rem;
         }
 
+        .barcode-row-main {
+            min-width: 0;
+            flex: 1;
+        }
+
         .barcode-row-actions {
             display: flex;
-            gap: 0.25rem;
+            gap: 0.35rem;
             flex-shrink: 0;
+        }
+
+        .recipe-nutrition-preview {
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem 0.75rem;
+        }
+
+        .recipe-nutrition-preview strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .nutrient-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+        }
+
+        @media (max-width: 480px) {
+            .nutrient-grid {
+                grid-template-columns: 1fr;
+            }
         }
 
         /* Responsive adjustments */
@@ -1027,6 +1058,75 @@
                     <button class="btn btn-danger" onclick="deleteEditingItem()" style="background: var(--accent-red); border-color: var(--accent-red);">Verwijderen</button>
                     <button class="btn" onclick="closeEditItemModal()">Annuleren</button>
                     <button class="btn btn-primary" onclick="saveEditingItem()">Opslaan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Barcode Product Modal -->
+    <div class="modal-overlay" id="edit-barcode-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Barcode waarden</h2>
+                <button class="modal-close" onclick="closeEditBarcodeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                    Barcode: <code id="edit-bc-code"></code>
+                </p>
+                <div class="form-group">
+                    <label class="form-label">Productnaam</label>
+                    <input type="text" class="form-input" id="edit-bc-product-name" placeholder="Productnaam">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Merk</label>
+                    <input type="text" class="form-input" id="edit-bc-brands" placeholder="Merk">
+                </div>
+                <div class="nutrient-grid">
+                    <div class="form-group">
+                        <label class="form-label">Energie (kcal / 100 g)</label>
+                        <input type="number" step="any" class="form-input" id="edit-bc-kcal-100g">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Energie (kcal / portie)</label>
+                        <input type="number" step="any" class="form-input" id="edit-bc-kcal-serving">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Eiwitten (g / 100 g)</label>
+                        <input type="number" step="any" class="form-input" id="edit-bc-proteins">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Koolhydraten (g / 100 g)</label>
+                        <input type="number" step="any" class="form-input" id="edit-bc-carbs">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Vetten (g / 100 g)</label>
+                        <input type="number" step="any" class="form-input" id="edit-bc-fat">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Verzadigde vetten (g / 100 g)</label>
+                        <input type="number" step="any" class="form-input" id="edit-bc-sat-fat">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Suikers (g / 100 g)</label>
+                        <input type="number" step="any" class="form-input" id="edit-bc-sugars">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Vezels (g / 100 g)</label>
+                        <input type="number" step="any" class="form-input" id="edit-bc-fiber">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Zout (g / 100 g)</label>
+                        <input type="number" step="any" class="form-input" id="edit-bc-salt">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Allergenen (komma-gescheiden)</label>
+                    <input type="text" class="form-input" id="edit-bc-allergens" placeholder="milk, gluten">
+                </div>
+                <div class="location-buttons">
+                    <button class="btn" onclick="closeEditBarcodeModal()">Annuleren</button>
+                    <button class="btn btn-primary" onclick="saveEditBarcode()">Opslaan</button>
                 </div>
             </div>
         </div>
@@ -1673,6 +1773,21 @@
                     statusText = `◐ ${available}/${total} ingrediënten in voorraad (${Math.round(percentage * 100)}%)`;
                 }
 
+                const per100 = recipe.nutrition?.per_100g || {};
+                const kcal = per100.energy_kcal;
+                const protein = per100.proteins;
+                const carbs = per100.carbohydrates;
+                const fat = per100.fat;
+                const nutritionPreview = `
+                    <div class="recipe-nutrition-preview">
+                        <span><strong>Per 100 g:</strong></span>
+                        <span>Energie ${kcal != null ? kcal + ' kcal' : '—'}</span>
+                        <span>Eiwit ${protein != null ? protein + ' g' : '—'}</span>
+                        <span>Koolh. ${carbs != null ? carbs + ' g' : '—'}</span>
+                        <span>Vet ${fat != null ? fat + ' g' : '—'}</span>
+                    </div>
+                `;
+
                 return `
                     <div class="recipe-card" style="display: flex; justify-content: space-between; align-items: flex-start;">
                         <div onclick="window.location.href='/recipe/${recipe.id}'" style="flex: 1; cursor: pointer;">
@@ -1685,6 +1800,7 @@
                                 ${recipe.prep_time_minutes ? ` • ${recipe.prep_time_minutes} min voorbereiding` : ''}
                                 ${recipe.cook_time_minutes ? ` • ${recipe.cook_time_minutes} min koken` : ''}
                             </div>
+                            ${nutritionPreview}
                             <div class="ingredient-status ${statusClass}">
                                 ${statusText}
                             </div>
@@ -1843,34 +1959,140 @@
             }
         }
 
+        let editingBarcodeId = null;
+        let editBarcodesById = {};
+
         function renderEditBarcodes(item) {
             const barcodesGroup = document.getElementById('edit-barcodes-group');
             const barcodesList = document.getElementById('edit-barcodes-list');
 
             if (!item.barcodes || item.barcodes.length === 0) {
                 barcodesGroup.style.display = 'none';
+                editBarcodesById = {};
                 return;
             }
+
+            editBarcodesById = {};
+            item.barcodes.forEach(b => { editBarcodesById[b.id] = b; });
 
             barcodesGroup.style.display = 'block';
             barcodesList.innerHTML = item.barcodes.map(b => {
                 const label = b.product_name || b.brands || '';
+                const kcal = b.energy_kcal_100g != null ? `${b.energy_kcal_100g} kcal/100g` : '';
                 return `
                     <div class="barcode-row ${b.is_active ? 'active' : ''}" onclick="setActiveBarcode(${b.id})">
                         <div class="barcode-row-main">
                             <span>
                                 <code class="barcode-code">${escapeHtml(b.code)}</code>
-                                ${b.is_active ? '<span class="barcode-badge">Active</span>' : ''}
+                                ${b.is_active ? '<span class="barcode-badge">Actief</span>' : ''}
                             </span>
-                            ${label ? `<div class="barcode-product">${escapeHtml(label)}</div>` : ''}
+                            ${label ? `<div class="barcode-product">${escapeHtml(label)}${kcal ? ' · ' + kcal : ''}</div>` : (kcal ? `<div class="barcode-product">${kcal}</div>` : '')}
                         </div>
                         <div class="barcode-row-actions" onclick="event.stopPropagation()">
-                            ${!b.is_active ? `<button class="btn btn-sm" onclick="setActiveBarcode(${b.id})">Set active</button>` : ''}
-                            <button class="btn btn-sm" onclick="refreshBarcode(${b.id})" title="Refresh from Open Food Facts">↻</button>
+                            <button class="btn btn-sm" onclick="openEditBarcodeModal(${b.id})" title="Waarden bewerken">✎</button>
+                            ${!b.is_active ? `<button class="btn btn-sm" onclick="setActiveBarcode(${b.id})">Actief</button>` : ''}
+                            <button class="btn btn-sm" onclick="refreshBarcode(${b.id})" title="Vernieuw vanuit Open Food Facts">↻</button>
                         </div>
                     </div>
                 `;
             }).join('');
+        }
+
+        function _numOrEmpty(value) {
+            return value == null || value === '' ? '' : value;
+        }
+
+        function openEditBarcodeModal(barcodeId) {
+            const barcode = editBarcodesById[barcodeId];
+            if (!barcode) {
+                showToast('Barcode niet gevonden', 'error');
+                return;
+            }
+            editingBarcodeId = barcode.id;
+            const n = barcode.nutriments || {};
+            document.getElementById('edit-bc-code').textContent = barcode.code || '';
+            document.getElementById('edit-bc-product-name').value = barcode.product_name || '';
+            document.getElementById('edit-bc-brands').value = barcode.brands || '';
+            document.getElementById('edit-bc-kcal-100g').value = _numOrEmpty(barcode.energy_kcal_100g);
+            document.getElementById('edit-bc-kcal-serving').value = _numOrEmpty(barcode.energy_kcal_serving);
+            document.getElementById('edit-bc-proteins').value = _numOrEmpty(n.proteins_100g);
+            document.getElementById('edit-bc-carbs').value = _numOrEmpty(n.carbohydrates_100g);
+            document.getElementById('edit-bc-fat').value = _numOrEmpty(n.fat_100g);
+            document.getElementById('edit-bc-sat-fat').value = _numOrEmpty(n['saturated-fat_100g']);
+            document.getElementById('edit-bc-sugars').value = _numOrEmpty(n.sugars_100g);
+            document.getElementById('edit-bc-fiber').value = _numOrEmpty(n.fiber_100g);
+            document.getElementById('edit-bc-salt').value = _numOrEmpty(n.salt_100g);
+            document.getElementById('edit-bc-allergens').value = (barcode.allergens || []).join(', ');
+            document.getElementById('edit-barcode-modal').classList.add('active');
+        }
+
+        function closeEditBarcodeModal() {
+            document.getElementById('edit-barcode-modal').classList.remove('active');
+            editingBarcodeId = null;
+        }
+
+        function _parseOptionalNumber(id) {
+            const raw = document.getElementById(id).value.trim();
+            if (raw === '') return null;
+            const n = Number(raw);
+            return Number.isFinite(n) ? n : null;
+        }
+
+        async function saveEditBarcode() {
+            if (!editingBarcodeId) return;
+
+            const nutriments = {};
+            const protein = _parseOptionalNumber('edit-bc-proteins');
+            const carbs = _parseOptionalNumber('edit-bc-carbs');
+            const fat = _parseOptionalNumber('edit-bc-fat');
+            const satFat = _parseOptionalNumber('edit-bc-sat-fat');
+            const sugars = _parseOptionalNumber('edit-bc-sugars');
+            const fiber = _parseOptionalNumber('edit-bc-fiber');
+            const salt = _parseOptionalNumber('edit-bc-salt');
+            if (protein != null) nutriments.proteins_100g = protein;
+            if (carbs != null) nutriments.carbohydrates_100g = carbs;
+            if (fat != null) nutriments.fat_100g = fat;
+            if (satFat != null) nutriments['saturated-fat_100g'] = satFat;
+            if (sugars != null) nutriments.sugars_100g = sugars;
+            if (fiber != null) nutriments.fiber_100g = fiber;
+            if (salt != null) nutriments.salt_100g = salt;
+
+            const allergensRaw = document.getElementById('edit-bc-allergens').value.trim();
+            const allergens = allergensRaw
+                ? allergensRaw.split(',').map(s => s.trim()).filter(Boolean)
+                : [];
+
+            const payload = {
+                product_name: document.getElementById('edit-bc-product-name').value.trim() || null,
+                brands: document.getElementById('edit-bc-brands').value.trim() || null,
+                energy_kcal_100g: _parseOptionalNumber('edit-bc-kcal-100g'),
+                energy_kcal_serving: _parseOptionalNumber('edit-bc-kcal-serving'),
+                allergens,
+                nutriments,
+            };
+
+            try {
+                const response = await fetch(`${API_BASE}/barcodes/${editingBarcodeId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.detail || 'Opslaan mislukt');
+                }
+                closeEditBarcodeModal();
+                if (editingItemId) {
+                    const itemRes = await fetch(`${API_BASE}/items/${editingItemId}`);
+                    if (itemRes.ok) renderEditBarcodes(await itemRes.json());
+                }
+                loadInventory();
+                loadGrocery();
+                loadRecipes();
+                showToast('Barcode waarden opgeslagen', 'success');
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
         }
 
         async function setActiveBarcode(barcodeId) {

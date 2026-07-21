@@ -353,3 +353,65 @@ Respond ONLY with valid JSON:
             "steps": [],
             "source_url": url,
         }
+
+
+def translate_recipe_content(recipe: dict, target_lang: str) -> dict:
+    """
+    Translate recipe name/description/ingredients/steps between Dutch and English.
+
+    ``target_lang`` is ``en`` or ``nl``.
+    """
+    if not is_configured():
+        raise ValueError("GEMINI_API_KEY environment variable is not set")
+
+    lang_name = "English" if target_lang == "en" else "Dutch"
+    model = get_model()
+    prompt = f"""Translate this recipe to {lang_name}.
+Keep amounts and units as-is (do not convert units). Only translate text fields.
+Preserve list lengths and step numbers exactly.
+
+RECIPE JSON:
+{json.dumps(recipe, ensure_ascii=False)}
+
+Respond ONLY with valid JSON in this shape:
+{{
+  "name": "...",
+  "description": "... or null",
+  "ingredients": [
+    {{"name": "...", "notes": "... or null"}}
+  ],
+  "steps": [
+    {{"step_number": 1, "instruction": "..."}}
+  ]
+}}"""
+
+    try:
+        response = model.generate_content(prompt)
+        result = json.loads(_extract_json_text(response.text))
+        # Preserve lengths / step numbers from the source recipe
+        src_ings = recipe.get("ingredients") or []
+        src_steps = recipe.get("steps") or []
+        out_ings = result.get("ingredients") if isinstance(result.get("ingredients"), list) else []
+        out_steps = result.get("steps") if isinstance(result.get("steps"), list) else []
+        ingredients = []
+        for i, src in enumerate(src_ings):
+            translated = out_ings[i] if i < len(out_ings) and isinstance(out_ings[i], dict) else {}
+            ingredients.append({
+                "name": translated.get("name") or src.get("name"),
+                "notes": translated.get("notes") if "notes" in translated else src.get("notes"),
+            })
+        steps = []
+        for i, src in enumerate(src_steps):
+            translated = out_steps[i] if i < len(out_steps) and isinstance(out_steps[i], dict) else {}
+            steps.append({
+                "step_number": src.get("step_number", i + 1),
+                "instruction": translated.get("instruction") or src.get("instruction"),
+            })
+        return {
+            "name": result.get("name") or recipe.get("name"),
+            "description": result.get("description", recipe.get("description")),
+            "ingredients": ingredients,
+            "steps": steps,
+        }
+    except Exception as e:
+        return {"error": str(e)}

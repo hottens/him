@@ -170,9 +170,38 @@ class RecipeStepResponse(RecipeStepBase):
 
 class RecipeNutritionSummary(BaseModel):
     totals: dict[str, float] = Field(default_factory=dict)
+    per_100g: dict[str, float] = Field(default_factory=dict)
     allergens: list[str] = Field(default_factory=list)
     ingredients_included: list[str] = Field(default_factory=list)
     ingredients_skipped: list[str] = Field(default_factory=list)
+
+
+class BarcodeUpdate(BaseModel):
+    """Manual edits for Open Food Facts fields stored on a barcode."""
+    product_name: Optional[str] = None
+    brands: Optional[str] = None
+    keywords: Optional[list[str]] = None
+    ingredients_en: Optional[list[str]] = None
+    ingredients_hierarchy_en: Optional[list[str]] = None
+    ingredients_nl: Optional[list[str]] = None
+    ingredients_hierarchy_nl: Optional[list[str]] = None
+    allergens: Optional[list[str]] = None
+    nutriments: Optional[dict[str, Any]] = None
+    energy_kcal_100g: Optional[float] = None
+    energy_kcal_serving: Optional[float] = None
+
+
+class RecipeTranslateRequest(BaseModel):
+    lang: str = "en"  # "en" or "nl"
+
+
+class RecipeTranslateResponse(BaseModel):
+    lang: str
+    name: str
+    description: Optional[str] = None
+    ingredients: list[dict[str, Any]] = Field(default_factory=list)
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    ui: dict[str, str] = Field(default_factory=dict)
 
 
 class RecipeBase(BaseModel):

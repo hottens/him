@@ -184,6 +184,23 @@ async def fetch_barcode_product(barcode_id: int, db: Session = Depends(get_db)):
     return serialize_barcode(barcode, active_id)
 
 
+@app.patch("/api/barcodes/{barcode_id}", response_model=schemas.BarcodeResponse)
+async def update_barcode_product(
+    barcode_id: int,
+    update: schemas.BarcodeUpdate,
+    db: Session = Depends(get_db),
+):
+    """Manually edit product / nutrition fields stored on a barcode."""
+    barcode = db.query(Barcode).filter(Barcode.id == barcode_id).first()
+    if not barcode:
+        raise HTTPException(status_code=404, detail="Barcode not found")
+    product_data.apply_barcode_update(barcode, update.model_dump(exclude_unset=True))
+    db.commit()
+    db.refresh(barcode)
+    active_id = barcode.item.active_barcode_id if barcode.item else None
+    return serialize_barcode(barcode, active_id)
+
+
 # --- Item Endpoints ---
 
 @app.get("/api/items", response_model=list[schemas.ItemResponse])
@@ -546,6 +563,83 @@ async def toggle_favorite(recipe_id: int, db: Session = Depends(get_db)):
     return serialize_recipe(recipe)
 
 
+@app.post("/api/recipes/{recipe_id}/translate", response_model=schemas.RecipeTranslateResponse)
+async def translate_recipe(
+    recipe_id: int,
+    request: schemas.RecipeTranslateRequest,
+    db: Session = Depends(get_db),
+):
+    """Translate recipe content to Dutch or English via Gemini."""
+    if not gemini_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Gemini API is not configured. Set GEMINI_API_KEY environment variable.",
+        )
+    lang = (request.lang or "en").lower()
+    if lang not in {"en", "nl"}:
+        raise HTTPException(status_code=400, detail="lang must be 'en' or 'nl'")
+
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    payload = {
+        "name": recipe.name,
+        "description": recipe.description,
+        "ingredients": [
+            {"name": ing.name, "notes": ing.notes}
+            for ing in recipe.ingredients
+        ],
+        "steps": [
+            {"step_number": step.step_number, "instruction": step.instruction}
+            for step in sorted(recipe.steps, key=lambda s: s.step_number)
+        ],
+    }
+    result = gemini_service.translate_recipe_content(payload, lang)
+    if result.get("error"):
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    ui_nl = {
+        "servings": "Porties",
+        "prep": "Voorbereiding",
+        "cook": "Koken",
+        "total": "Totaal",
+        "ingredients": "Ingrediënten",
+        "instructions": "Bereidingswijze",
+        "nutrition": "Voedingswaarden",
+        "per_100g": "Per 100 g",
+        "recipe_total": "Totaal recept",
+        "allergens": "Allergenen",
+        "back": "Terug naar recepten",
+        "link_hint": "Klik op een ingrediënt om het te koppelen aan een voorraaditem",
+        "source": "Bekijk origineel recept →",
+    }
+    ui_en = {
+        "servings": "Servings",
+        "prep": "Prep",
+        "cook": "Cook",
+        "total": "Total",
+        "ingredients": "Ingredients",
+        "instructions": "Instructions",
+        "nutrition": "Nutrition",
+        "per_100g": "Per 100 g",
+        "recipe_total": "Recipe total",
+        "allergens": "Allergens",
+        "back": "Back to recipes",
+        "link_hint": "Click an ingredient to link it to an inventory item",
+        "source": "View original recipe →",
+    }
+
+    return schemas.RecipeTranslateResponse(
+        lang=lang,
+        name=result.get("name") or recipe.name,
+        description=result.get("description", recipe.description),
+        ingredients=result.get("ingredients") or [],
+        steps=result.get("steps") or [],
+        ui=ui_en if lang == "en" else ui_nl,
+    )
+
+
 class ImportUrlRequest(schemas.BaseModel):
     """Request to import a recipe from a URL."""
     url: str
@@ -752,7 +846,11 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     for ing in recipe.ingredients:
         amount_str = f"{ing.amount} " if ing.amount else ""
         unit_str = f"{ing.unit} " if ing.unit else ""
-        notes_str = f" <span class='notes'>({ing.notes})</span>" if ing.notes else ""
+        notes_html = (
+            f" <span class='notes' data-ing-notes='{ing.id}'>"
+            f"{'(' + ing.notes + ')' if ing.notes else ''}"
+            f"</span>"
+        )
         
         # Check availability: prefer item_id match, fallback to name match
         if ing.item_id and ing.matched_item:
@@ -779,7 +877,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         ingredients_html += f"""<li class='{status_class}' data-ing-id='{ing.id}'>
             <span class='status-icon'>{status_icon}</span>
             <div class='ingredient-content' onclick='openIngredientDropdown({ing.id})'>
-                {amount_str}{unit_str}{ing.name}{notes_str}{match_info}
+                {amount_str}{unit_str}<span class='ing-name' data-ing-name='{ing.id}'>{ing.name}</span>{notes_html}{match_info}
             </div>
             <div class='ingredient-dropdown' id='dropdown-{ing.id}'></div>
         </li>"""
@@ -797,7 +895,10 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     # Generate steps HTML
     steps_html = ""
     for step in sorted_steps:
-        steps_html += f"<li>{step.instruction}</li>"
+        steps_html += (
+            f"<li data-step-number='{step.step_number}'>"
+            f"<span class='step-text'>{step.instruction}</span></li>"
+        )
     
     # Calculate total time
     total_time = (recipe.prep_time_minutes or 0) + (recipe.cook_time_minutes or 0)
@@ -831,44 +932,68 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
 
     nutrition = recipe_nutrition_summary(recipe)
     totals = nutrition.totals
-    nutrition_rows = []
-    labels = [
-        ("energy_kcal", "Energy", "kcal"),
-        ("proteins", "Protein", "g"),
-        ("carbohydrates", "Carbs", "g"),
-        ("fat", "Fat", "g"),
-        ("saturated-fat", "Saturated fat", "g"),
-        ("sugars", "Sugars", "g"),
-        ("fiber", "Fiber", "g"),
-        ("salt", "Salt", "g"),
+    per_100g = nutrition.per_100g
+    nutrient_labels = [
+        ("energy_kcal", "Energie", "kcal"),
+        ("proteins", "Eiwitten", "g"),
+        ("carbohydrates", "Koolhydraten", "g"),
+        ("fat", "Vetten", "g"),
+        ("saturated-fat", "Verzadigde vetten", "g"),
+        ("sugars", "Suikers", "g"),
+        ("fiber", "Vezels", "g"),
+        ("salt", "Zout", "g"),
     ]
-    for key, label, unit in labels:
-        if key in totals:
-            nutrition_rows.append(
-                f"<div class='nutrition-row'><span>{label}</span><span>{totals[key]} {unit}</span></div>"
+
+    def _nutrition_rows(values: dict, labels=nutrient_labels) -> str:
+        rows = []
+        for key, label, unit in labels:
+            if key in values and values[key] is not None:
+                display = f"{values[key]} {unit}"
+            else:
+                display = "—"
+            rows.append(
+                f"<div class='nutrition-row' data-nutrient='{key}'>"
+                f"<span data-i18n-nutrient-label='{key}'>{label}</span>"
+                f"<span>{display}</span></div>"
             )
+        return "".join(rows)
+
+    totals_rows = _nutrition_rows(totals)
+    per100_rows = _nutrition_rows(per_100g)
+
     allergens_html = ""
     if nutrition.allergens:
         chips = "".join(f"<span class='allergen-chip'>{a}</span>" for a in nutrition.allergens)
-        allergens_html = f"<div class='allergens'><div class='allergens-label'>Allergens</div><div class='allergen-chips'>{chips}</div></div>"
-    if nutrition_rows or allergens_html:
-        skipped_note = ""
-        if nutrition.ingredients_skipped:
-            skipped_note = (
-                f"<p class='nutrition-note'>Geen voedingswaarde meegenomen voor: "
-                f"{', '.join(nutrition.ingredients_skipped)}</p>"
-            )
-        nutrition_html = f"""
-        <h2>Nutrition</h2>
-        <p class="nutrition-note">Opgeteld uit gekoppelde producten (actieve barcode), waar hoeveelheid in gram beschikbaar is.</p>
-        <div class="nutrition-box">
-            {''.join(nutrition_rows) if nutrition_rows else '<p class="nutrition-note">Nog geen kcal/macros beschikbaar.</p>'}
-        </div>
+        allergens_html = (
+            "<div class='allergens'>"
+            "<div class='allergens-label' data-i18n='allergens'>Allergenen</div>"
+            f"<div class='allergen-chips'>{chips}</div></div>"
+        )
+
+    skipped_note = ""
+    if nutrition.ingredients_skipped:
+        skipped_note = (
+            f"<p class='nutrition-note'>Geen productdata voor: "
+            f"{', '.join(nutrition.ingredients_skipped)}</p>"
+        )
+
+    totals_block = (
+        f"<h3 class='nutrition-subtitle' data-i18n='recipe_total'>Totaal recept</h3>"
+        f"<div class='nutrition-box' id='nutrition-totals'>{totals_rows}</div>"
+    )
+    per100_block = (
+        f"<h3 class='nutrition-subtitle' data-i18n='per_100g'>Per 100 g</h3>"
+        f"<div class='nutrition-box' id='nutrition-per100'>{per100_rows}</div>"
+    )
+
+    nutrition_html = f"""
+        <h2 data-i18n="nutrition">Voedingswaarden</h2>
+        <p class="nutrition-note">Op basis van gekoppelde voorraaditems (actieve barcode).</p>
+        {per100_block}
+        {totals_block}
         {allergens_html}
         {skipped_note}
         """
-    else:
-        nutrition_html = ""
 
     html = f"""
 <!DOCTYPE html>
@@ -1087,6 +1212,37 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             font-size: 0.8rem;
             color: var(--text-muted);
             margin: 0.5rem 0 1rem;
+        }}
+        .nutrition-subtitle {{
+            font-family: 'Inter', sans-serif;
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin: 1rem 0 0.5rem;
+            color: var(--text);
+        }}
+        .lang-toggle {{
+            display: inline-flex;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-right: 0.5rem;
+        }}
+        .lang-toggle button {{
+            border: none;
+            background: #fff;
+            padding: 0.4rem 0.75rem;
+            cursor: pointer;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }}
+        .lang-toggle button.active {{
+            background: var(--accent);
+            color: #fff;
+        }}
+        .header-actions {{
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }}
         .allergens {{ margin: 1rem 0; }}
         .allergens-label {{
@@ -1593,39 +1749,45 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
 </head>
 <body>
     <div class="header-row">
-        <a href="/?tab=recipes" class="back-link">← Terug naar overzicht</a>
-        <button class="edit-btn" onclick="toggleEditMode()" id="edit-toggle-btn">
-            ✏️ Bewerken
-        </button>
+        <a href="/?tab=recipes" class="back-link" data-i18n="back">← Terug naar overzicht</a>
+        <div class="header-actions">
+            <div class="lang-toggle" title="Taal / Language">
+                <button type="button" id="lang-nl" class="active" onclick="setRecipeLanguage('nl')">NL</button>
+                <button type="button" id="lang-en" onclick="setRecipeLanguage('en')">EN</button>
+            </div>
+            <button class="edit-btn" onclick="toggleEditMode()" id="edit-toggle-btn">
+                ✏️ Bewerken
+            </button>
+        </div>
     </div>
     
     <!-- VIEW MODE -->
     <div class="view-mode">
-        <h1>{recipe.name}</h1>
+        <h1 id="recipe-title">{recipe.name}</h1>
         
-        {'<p class="description">' + recipe.description + '</p>' if recipe.description else ''}
+        {'<p class="description" id="recipe-description">' + recipe.description + '</p>' if recipe.description else '<p class="description" id="recipe-description" style="display:none;"></p>'}
         
         <div class="meta">
             <div class="meta-item">
-                <span class="meta-label">Porties</span>
+                <span class="meta-label" data-i18n="servings">Porties</span>
                 <span class="meta-value">{recipe.servings}</span>
             </div>
             <div class="meta-item">
-                <span class="meta-label">Voorbereiding</span>
+                <span class="meta-label" data-i18n="prep">Voorbereiding</span>
                 <span class="meta-value">{recipe.prep_time_minutes or '—'} min</span>
             </div>
             <div class="meta-item">
-                <span class="meta-label">Koken</span>
+                <span class="meta-label" data-i18n="cook">Koken</span>
                 <span class="meta-value">{recipe.cook_time_minutes or '—'} min</span>
             </div>
             <div class="meta-item">
-                <span class="meta-label">Totaal</span>
+                <span class="meta-label" data-i18n="total">Totaal</span>
                 <span class="meta-value">{time_str}</span>
             </div>
         </div>
         
-        <h2>Ingrediënten</h2>
-        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">Klik op een ingrediënt om het te koppelen aan een voorraaditem</p>
+        <h2 data-i18n="ingredients">Ingrediënten</h2>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;" data-i18n="link_hint">Klik op een ingrediënt om het te koppelen aan een voorraaditem</p>
         {availability_html}
         <div class="ingredients">
             <ul>
@@ -1635,14 +1797,14 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
 
         {nutrition_html}
         
-        <h2>Bereidingswijze</h2>
+        <h2 data-i18n="instructions">Bereidingswijze</h2>
         <div class="steps">
             <ol>
                 {steps_html}
             </ol>
         </div>
         
-        {'<div class="source-link"><a href="' + recipe.source_url + '" target="_blank" rel="noopener noreferrer">📎 Bekijk origineel recept →</a></div>' if recipe.source_url else ''}
+        {'<div class="source-link"><a href="' + recipe.source_url + '" target="_blank" rel="noopener noreferrer" data-i18n="source">📎 Bekijk origineel recept →</a></div>' if recipe.source_url else ''}
     </div>
     
     <!-- EDIT MODE -->
@@ -1711,6 +1873,133 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         const ingredientData = {ingredients_json};
         const allItems = {items_json};
         const recipeId = {recipe.id};
+        let currentLang = 'nl';
+        const originalRecipe = {{
+            name: {json.dumps(recipe.name)},
+            description: {json.dumps(recipe.description)},
+            ingredients: {ingredients_json},
+            steps: {json.dumps([{"step_number": s.step_number, "instruction": s.instruction} for s in sorted_steps])},
+            ui: {{
+                servings: 'Porties',
+                prep: 'Voorbereiding',
+                cook: 'Koken',
+                total: 'Totaal',
+                ingredients: 'Ingrediënten',
+                instructions: 'Bereidingswijze',
+                nutrition: 'Voedingswaarden',
+                per_100g: 'Per 100 g',
+                recipe_total: 'Totaal recept',
+                allergens: 'Allergenen',
+                back: '← Terug naar overzicht',
+                link_hint: 'Klik op een ingrediënt om het te koppelen aan een voorraaditem',
+                source: '📎 Bekijk origineel recept →',
+            }},
+            nutrientLabels: {{
+                energy_kcal: 'Energie',
+                proteins: 'Eiwitten',
+                carbohydrates: 'Koolhydraten',
+                fat: 'Vetten',
+                'saturated-fat': 'Verzadigde vetten',
+                sugars: 'Suikers',
+                fiber: 'Vezels',
+                salt: 'Zout',
+            }},
+        }};
+        const translatedCache = {{ en: null }};
+        const nutrientLabelsEn = {{
+            energy_kcal: 'Energy',
+            proteins: 'Protein',
+            carbohydrates: 'Carbs',
+            fat: 'Fat',
+            'saturated-fat': 'Saturated fat',
+            sugars: 'Sugars',
+            fiber: 'Fiber',
+            salt: 'Salt',
+        }};
+
+        async function setRecipeLanguage(lang) {{
+            if (lang === currentLang) return;
+            document.getElementById('lang-nl').classList.toggle('active', lang === 'nl');
+            document.getElementById('lang-en').classList.toggle('active', lang === 'en');
+
+            if (lang === 'nl') {{
+                applyRecipeTranslation({{
+                    name: originalRecipe.name,
+                    description: originalRecipe.description,
+                    ingredients: originalRecipe.ingredients.map(i => ({{ name: i.name, notes: i.notes || null }})),
+                    steps: originalRecipe.steps,
+                    ui: originalRecipe.ui,
+                    nutrientLabels: originalRecipe.nutrientLabels,
+                }});
+                currentLang = 'nl';
+                return;
+            }}
+
+            if (translatedCache.en) {{
+                applyRecipeTranslation(translatedCache.en);
+                currentLang = 'en';
+                return;
+            }}
+
+            try {{
+                showToast('Vertalen…');
+                const response = await fetch(`/api/recipes/${{recipeId}}/translate`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ lang: 'en' }}),
+                }});
+                if (!response.ok) {{
+                    const err = await response.json().catch(() => ({{}}));
+                    throw new Error(err.detail || 'Vertalen mislukt');
+                }}
+                const data = await response.json();
+                data.nutrientLabels = nutrientLabelsEn;
+                translatedCache.en = data;
+                applyRecipeTranslation(data);
+                currentLang = 'en';
+            }} catch (err) {{
+                showToast(err.message || 'Vertalen mislukt');
+                document.getElementById('lang-nl').classList.add('active');
+                document.getElementById('lang-en').classList.remove('active');
+            }}
+        }}
+
+        function applyRecipeTranslation(data) {{
+            const title = document.getElementById('recipe-title');
+            if (title) title.textContent = data.name || '';
+            const desc = document.getElementById('recipe-description');
+            if (desc) {{
+                if (data.description) {{
+                    desc.textContent = data.description;
+                    desc.style.display = '';
+                }} else {{
+                    desc.textContent = '';
+                    desc.style.display = 'none';
+                }}
+            }}
+            (data.ingredients || []).forEach((ing, idx) => {{
+                const src = originalRecipe.ingredients[idx];
+                if (!src) return;
+                const nameEl = document.querySelector(`[data-ing-name="${{src.id}}"]`);
+                if (nameEl && ing.name) nameEl.textContent = ing.name;
+                const notesEl = document.querySelector(`[data-ing-notes="${{src.id}}"]`);
+                if (notesEl) notesEl.textContent = ing.notes ? `(${{ing.notes}})` : '';
+            }});
+            (data.steps || []).forEach(step => {{
+                const el = document.querySelector(`li[data-step-number="${{step.step_number}}"] .step-text`);
+                if (el && step.instruction) el.textContent = step.instruction;
+            }});
+            const ui = data.ui || {{}};
+            document.querySelectorAll('[data-i18n]').forEach(el => {{
+                const key = el.getAttribute('data-i18n');
+                if (ui[key]) el.textContent = ui[key];
+            }});
+            const labels = data.nutrientLabels || {{}};
+            document.querySelectorAll('[data-i18n-nutrient-label]').forEach(el => {{
+                const key = el.getAttribute('data-i18n-nutrient-label');
+                if (labels[key]) el.textContent = labels[key];
+            }});
+        }}
         
         // Edit mode state
         let editIngredients = JSON.parse(JSON.stringify(ingredientData));

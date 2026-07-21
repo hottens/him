@@ -72,6 +72,35 @@ def apply_product_data(barcode: Barcode, product: dict) -> None:
     barcode.product_fetched_at = datetime.utcnow()
 
 
+def apply_barcode_update(barcode: Barcode, updates: dict) -> None:
+    """Apply partial manual edits to barcode product fields."""
+    if "product_name" in updates:
+        barcode.product_name = updates["product_name"]
+    if "brands" in updates:
+        barcode.brands = updates["brands"]
+    if "keywords" in updates:
+        barcode.keywords = dumps_json(updates["keywords"] or [])
+    if "ingredients_en" in updates:
+        barcode.ingredients_en = dumps_json(updates["ingredients_en"] or [])
+    if "ingredients_hierarchy_en" in updates:
+        barcode.ingredients_hierarchy_en = dumps_json(updates["ingredients_hierarchy_en"] or [])
+    if "ingredients_nl" in updates:
+        barcode.ingredients_nl = dumps_json(updates["ingredients_nl"] or [])
+    if "ingredients_hierarchy_nl" in updates:
+        barcode.ingredients_hierarchy_nl = dumps_json(updates["ingredients_hierarchy_nl"] or [])
+    if "allergens" in updates:
+        barcode.allergens = dumps_json(updates["allergens"] or [])
+    if "nutriments" in updates:
+        barcode.nutriments = dumps_json(updates["nutriments"] or {})
+    if "energy_kcal_100g" in updates:
+        barcode.energy_kcal_100g = updates["energy_kcal_100g"]
+    if "energy_kcal_serving" in updates:
+        barcode.energy_kcal_serving = updates["energy_kcal_serving"]
+    # Manual edits count as having product data
+    if barcode.product_fetched_at is None:
+        barcode.product_fetched_at = datetime.utcnow()
+
+
 def mark_barcode_scanned(db: Session, barcode: Barcode) -> None:
     """Mark barcode as last scanned and set it as the item's active barcode."""
     barcode.last_scanned_at = datetime.utcnow()

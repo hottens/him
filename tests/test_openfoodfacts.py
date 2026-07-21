@@ -107,3 +107,25 @@ class TestNutritionHelpers:
         assert result["allergens"] == ["milk", "sesame seeds"]
         assert "Cheese" in result["ingredients_included"]
         assert "Salt" in result["ingredients_skipped"]
+        # Weighted per 100g: (400*50 + 580*10) / 60 = 430
+        assert result["per_100g"]["energy_kcal"] == 430.0
+
+    def test_per_100g_without_gram_amounts(self):
+        result = aggregate_recipe_nutrition(
+            [
+                {
+                    "name": "Oil",
+                    "amount": "2",
+                    "unit": "tbsp",
+                    "product": {
+                        "energy_kcal_100g": 900,
+                        "nutriments": {"fat_100g": 100},
+                        "allergens": [],
+                    },
+                }
+            ]
+        )
+        assert result["totals"] == {}
+        assert result["per_100g"]["energy_kcal"] == 900.0
+        assert result["per_100g"]["fat"] == 100.0
+        assert "Oil" in result["ingredients_included"]

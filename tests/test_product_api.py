@@ -198,5 +198,107 @@ class TestRecipeNutritionApi:
 
         assert recipe["nutrition"] is not None
         assert recipe["nutrition"]["totals"]["energy_kcal"] == 201.0  # 402 * 50/100
+        assert recipe["nutrition"]["per_100g"]["energy_kcal"] == 402.0
         assert recipe["nutrition"]["allergens"] == ["milk"]
         assert "Parmesan" in recipe["nutrition"]["ingredients_included"]
+
+        page = client.get(f"/recipe/{recipe['id']}")
+        assert page.status_code == 200
+        assert "Per 100 g" in page.text
+        assert "Voedingswaarden" in page.text
+        assert "lang-nl" in page.text and "lang-en" in page.text
+
+
+class TestBarcodeManualUpdate:
+    def test_patch_barcode_updates_nutrition_fields(self, client, db_session):
+        client.patch("/api/settings", json={"auto_fetch_products": False})
+        item = client.post(
+            "/api/items",
+            json={"name": "Yoghurt", "location": "inventory", "barcode": "111"},
+        ).json()
+        barcode_id = item["barcodes"][0]["id"]
+
+        response = client.patch(
+            f"/api/barcodes/{barcode_id}",
+            json={
+                "product_name": "Griekse yoghurt",
+                "brands": "AH",
+                "energy_kcal_100g": 97.0,
+                "energy_kcal_serving": 145.5,
+                "allergens": ["milk"],
+                "nutriments": {
+                    "proteins_100g": 9.0,
+                    "carbohydrates_100g": 3.5,
+                    "fat_100g": 5.0,
+                    "salt_100g": 0.1,
+                },
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["product_name"] == "Griekse yoghurt"
+        assert data["brands"] == "AH"
+        assert data["energy_kcal_100g"] == 97.0
+        assert data["energy_kcal_serving"] == 145.5
+        assert data["allergens"] == ["milk"]
+        assert data["nutriments"]["proteins_100g"] == 9.0
+        assert data["nutriments"]["fat_100g"] == 5.0
+
+
+class TestRecipeTranslateApi:
+    def test_translate_recipe_returns_english_ui(self, client):
+        recipe = client.post(
+            "/api/recipes",
+            json={
+                "name": "Pannenkoeken",
+                "description": "Lekkere pannenkoeken",
+                "servings": 4,
+                "ingredients": [
+                    {"name": "bloem", "amount": "200", "unit": "g"},
+                    {"name": "melk", "amount": "300", "unit": "ml"},
+                ],
+                "steps": [{"step_number": 1, "instruction": "Mix alles"}],
+            },
+        ).json()
+
+        with patch("app.main.gemini_service.is_configured", return_value=True), patch(
+            "app.main.gemini_service.translate_recipe_content",
+            return_value={
+                "name": "Pancakes",
+                "description": "Tasty pancakes",
+                "ingredients": [
+                    {"name": "flour", "notes": None},
+                    {"name": "milk", "notes": None},
+                ],
+                "steps": [{"step_number": 1, "instruction": "Mix everything"}],
+            },
+        ):
+            response = client.post(
+                f"/api/recipes/{recipe['id']}/translate",
+                json={"lang": "en"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["lang"] == "en"
+        assert data["name"] == "Pancakes"
+        assert data["ingredients"][0]["name"] == "flour"
+        assert data["ui"]["ingredients"] == "Ingredients"
+        assert data["ui"]["per_100g"] == "Per 100 g"
+
+    def test_translate_requires_gemini(self, client):
+        recipe = client.post(
+            "/api/recipes",
+            json={
+                "name": "Soep",
+                "servings": 2,
+                "ingredients": [],
+                "steps": [],
+            },
+        ).json()
+        with patch("app.main.gemini_service.is_configured", return_value=False):
+            response = client.post(
+                f"/api/recipes/{recipe['id']}/translate",
+                json={"lang": "en"},
+            )
+        assert response.status_code == 503

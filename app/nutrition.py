@@ -135,15 +135,23 @@ def aggregate_recipe_nutrition(ingredients: list[dict]) -> dict:
     """
     Sum nutrition and collect allergens from recipe ingredients.
 
-    Each ingredient dict may include:
-      - amount, unit
-      - product: dict with energy_kcal_100g, energy_kcal_serving, nutriments, allergens
-      - name (for incomplete tracking)
+    Always also computes a grams-weighted ``per_100g`` profile from products
+    that have per-100g data (falls back to equal weight when grams unknown).
     """
     totals: dict[str, float] = {}
     allergens: set[str] = set()
     included: list[str] = []
     skipped: list[str] = []
+
+    # Weighted per-100g accumulation: (sum_value * weight, sum_weight)
+    per100_acc: dict[str, list[float]] = {}
+
+    def _add_per100(key: str, value: Optional[float], weight: float) -> None:
+        if value is None or weight <= 0:
+            return
+        bucket = per100_acc.setdefault(key, [0.0, 0.0])
+        bucket[0] += float(value) * weight
+        bucket[1] += weight
 
     for ing in ingredients:
         product = ing.get("product")
@@ -158,6 +166,15 @@ def aggregate_recipe_nutrition(ingredients: list[dict]) -> dict:
             if clean:
                 allergens.add(clean)
 
+        grams = parse_amount_grams(ing.get("amount"), ing.get("unit"))
+        weight = grams if grams and grams > 0 else 1.0
+
+        _add_per100("energy_kcal", product.get("energy_kcal_100g"), weight)
+        nutrients = _as_dict(product.get("nutriments"))
+        for key in NUTRIENT_KEYS:
+            out_key = key.replace("_100g", "")
+            _add_per100(out_key, nutrients.get(key), weight)
+
         contrib = ingredient_contribution(
             amount=ing.get("amount"),
             unit=ing.get("unit"),
@@ -166,15 +183,26 @@ def aggregate_recipe_nutrition(ingredients: list[dict]) -> dict:
             nutriments=product.get("nutriments"),
         )
         if not contrib:
-            skipped.append(name)
+            # Still count product toward per_100g / allergens even if we can't scale totals
+            if product.get("energy_kcal_100g") is not None or nutrients:
+                included.append(name)
+            else:
+                skipped.append(name)
             continue
 
         included.append(name)
         for key, value in contrib.items():
             totals[key] = round(totals.get(key, 0.0) + value, 2)
 
+    per_100g = {
+        key: round(num / den, 2)
+        for key, (num, den) in per100_acc.items()
+        if den > 0
+    }
+
     return {
         "totals": totals,
+        "per_100g": per_100g,
         "allergens": sorted(allergens),
         "ingredients_included": included,
         "ingredients_skipped": skipped,
