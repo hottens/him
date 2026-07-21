@@ -58,6 +58,14 @@ def client(db_session):
     
     # Create all tables for this test
     Base.metadata.create_all(bind=engine)
+
+    # Avoid real Open Food Facts network calls during ordinary CRUD tests
+    from app.models import Setting
+    db = TestingSessionLocal()
+    db.merge(Setting(key="auto_fetch_products", value="false"))
+    db.merge(Setting(key="translate_ingredients", value="false"))
+    db.commit()
+    db.close()
     
     with TestClient(app) as test_client:
         yield test_client

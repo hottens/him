@@ -1,6 +1,6 @@
 # Home Inventory Manager
 
-A minimal, local-first home inventory management system with barcode scanning.
+A minimal, local-first home inventory management system with barcode scanning and Open Food Facts product data.
 
 ## Overview
 
@@ -10,21 +10,17 @@ Track what's in your home and what you need to buy. No cloud, no accounts—just
 - Items are either in **Inventory** (at home), on the **Grocery List** (need to buy), or **Archived** (neither)
 - Scan a barcode to instantly move items between lists
 - New barcodes prompt you to name the item
+- Product data (name, brands, ingredients, allergens, nutrition) is loaded from [Open Food Facts](https://world.openfoodfacts.org/)
 - AI-powered recipe suggestions based on your inventory (Gemini)
-- Browse millions of recipes online (Spoonacular)
+- Recipe nutrition and allergens are summed from linked inventory products
 
 ## Quick Start
 
 ### Using Docker (Recommended)
 
 ```bash
-# Build and run
 docker-compose up -d
-
-# View logs
 docker-compose logs -f
-
-# Stop
 docker-compose down
 ```
 
@@ -33,14 +29,9 @@ Access at `http://<your-machine-ip>:4269`
 ### Without Docker
 
 ```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-
-# Install dependencies
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-
-# Run
 uvicorn app.main:app --host 0.0.0.0 --port 4269
 ```
 
@@ -53,290 +44,68 @@ uvicorn app.main:app --host 0.0.0.0 --port 4269
 3. Tap "Start Scanner" to activate your camera
 4. Point at a barcode
 
-**If the barcode is known:** The item instantly moves to your selected list.
+**If the barcode is known:** The item moves to your selected list, that barcode becomes the item's **active** barcode, and missing product data can be fetched automatically.
 
-**If the barcode is new:** A dialog appears where you can:
-- Name the new item, or
-- Search and select an existing item (to add a second barcode)
-- Choose which list to add it to
+**If the barcode is new:** Name the item or link it to an existing one.
 
-### Managing Items
+### Active barcode
 
-From the Inventory or Grocery tabs:
-- Tap 🛒 to move an item to the grocery list
-- Tap 🏠 to move an item to inventory
-- Tap 📦 to archive (remove from both lists, item stays in database)
-- Tap ✏️ to edit item name or delete it entirely
-- Click on item name to open edit modal
+An item can have multiple barcodes. The last scanned barcode becomes active automatically. Tap an item to open the edit modal and pick another barcode as active (used for nutrition/allergens on recipes).
 
-### Recipe Features
+### Settings (⚙)
 
-**Discover Recipes (Spoonacular + Gemini):**
-1. Go to Browse tab
-2. Click "Find What I Can Cook" to discover recipes using your inventory
-3. Ingredients are automatically translated to English via Gemini
-4. View recipes sorted by how many ingredients you already have
-5. Import recipes - Gemini AI parses them into clean, structured format
-
-**Favorites:**
-- Star recipes to mark as favorites
-- View favorites in the Favorites tab with ingredient availability status
-- See which recipes you can make with current inventory
-
-## API Reference
-
-All endpoints return JSON. Base URL: `http://<host>:4269/api`
-
-### Home Assistant Endpoints
-
-These return clean, stable JSON for REST sensors:
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/inventory` | Items currently at home |
-| `GET /api/grocery` | Items on grocery list |
-
-**Response format:**
-```json
-{
-  "count": 5,
-  "items": [
-    {
-      "id": 1,
-      "name": "Milk",
-      "location": "inventory",
-      "barcodes": [{"id": 1, "code": "012345678901", "item_id": 1}]
-    }
-  ]
-}
-```
-
-### Item Management
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/items` | List all items |
-| `GET` | `/api/items?location=inventory` | Filter by location |
-| `POST` | `/api/items` | Create new item |
-| `GET` | `/api/items/{id}` | Get single item |
-| `PATCH` | `/api/items/{id}` | Update item |
-| `DELETE` | `/api/items/{id}` | Delete item |
-
-### Quick Actions
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/items/{id}/to-inventory` | Move to inventory |
-| `POST` | `/api/items/{id}/to-grocery` | Move to grocery list |
-| `POST` | `/api/items/{id}/remove` | Remove from both lists |
-
-### Barcode Operations
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/barcode/{code}` | Look up barcode |
-| `POST` | `/api/barcode/associate` | Link barcode to item |
-
-### Search
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/search?q=milk` | Search items by name |
+- Auto-fetch product data from Open Food Facts
+- Translate ingredients / hierarchy to Dutch via Gemini
+- Reload all barcodes from Open Food Facts
 
 ### Recipes
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/recipes` | List all recipes |
-| `GET` | `/api/recipes?favorites_only=true` | List favorite recipes |
-| `POST` | `/api/recipes` | Create new recipe |
-| `GET` | `/api/recipes/{id}` | Get single recipe |
-| `PATCH` | `/api/recipes/{id}` | Update recipe metadata |
-| `PUT` | `/api/recipes/{id}` | Full update with ingredients/steps |
-| `DELETE` | `/api/recipes/{id}` | Delete recipe |
-| `POST` | `/api/recipes/{id}/favorite` | Toggle favorite status |
+- Gemini recipe ideas from inventory (Discover tab)
+- Favorites with ingredient availability
+- On the recipe page: summed energy/macros (when amounts are in grams) and a combined allergens list from linked products' active barcodes
 
-### AI Grocery Suggestions (Gemini)
-
-Requires `GEMINI_API_KEY` environment variable.
+## API highlights
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/ai/grocery-suggestions` | Get AI grocery suggestions |
+| `GET` | `/api/barcode/{code}` | Lookup + mark scanned/active (+ optional OFF fetch) |
+| `POST` | `/api/barcode/associate` | Link barcode to item |
+| `POST` | `/api/items/{id}/active-barcode` | Manually set active barcode |
+| `POST` | `/api/barcodes/reload-all` | Refresh all barcodes from Open Food Facts |
+| `POST` | `/api/barcodes/{id}/fetch` | Refresh one barcode |
+| `GET`/`PATCH` | `/api/settings` | App settings |
+| `GET` | `/api/recipes/{id}` | Recipe including `nutrition` summary |
 
-*Note: Gemini is also used internally for translating ingredients to English before Spoonacular searches, and for parsing imported recipes.*
-
-### Recipe Discovery & Import (Spoonacular + Gemini)
-
-Requires `SPOONACULAR_API_KEY` environment variable. Uses Gemini for parsing if configured.
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/spoonacular/discover` | Find recipes by inventory |
-| `GET` | `/api/spoonacular/recipe/{id}` | Get recipe details |
-| `POST` | `/api/spoonacular/import/{id}` | Import recipe (Gemini parses) |
-| `POST` | `/api/recipes/import-url` | Import recipe from any URL |
-
-## Home Assistant Integration
-
-### REST Sensors
-
-Add to `configuration.yaml`:
-
-```yaml
-sensor:
-  # Grocery list count
-  - platform: rest
-    name: Grocery List Count
-    resource: http://192.168.1.100:4269/api/grocery
-    value_template: "{{ value_json.count }}"
-    scan_interval: 60
-
-  # Inventory count
-  - platform: rest
-    name: Home Inventory Count
-    resource: http://192.168.1.100:4269/api/inventory
-    value_template: "{{ value_json.count }}"
-    scan_interval: 60
-
-  # Grocery items as attribute
-  - platform: rest
-    name: Grocery List
-    resource: http://192.168.1.100:4269/api/grocery
-    value_template: "{{ value_json.count }} items"
-    json_attributes:
-      - items
-    scan_interval: 60
-```
-
-### Template Sensor for Item Names
-
-```yaml
-template:
-  - sensor:
-      - name: "Grocery Items"
-        state: "{{ state_attr('sensor.grocery_list', 'items') | length }} items"
-        attributes:
-          items: >
-            {{ state_attr('sensor.grocery_list', 'items') 
-               | map(attribute='name') | list }}
-```
-
-### Automation Example
-
-Notify when grocery list gets long:
-
-```yaml
-automation:
-  - alias: "Grocery List Reminder"
-    trigger:
-      - platform: numeric_state
-        entity_id: sensor.grocery_list_count
-        above: 5
-    action:
-      - service: notify.mobile_app
-        data:
-          title: "Shopping Time"
-          message: "You have {{ states('sensor.grocery_list_count') }} items on your grocery list"
-```
-
-### Lovelace Card
-
-```yaml
-type: entities
-title: Grocery List
-entities:
-  - entity: sensor.grocery_list_count
-    name: Items to buy
-```
-
-Or for a more detailed list using auto-entities card:
-
-```yaml
-type: markdown
-title: Grocery List
-content: |
-  {% set items = state_attr('sensor.grocery_list', 'items') %}
-  {% if items %}
-    {% for item in items %}
-  - {{ item.name }}
-    {% endfor %}
-  {% else %}
-  _List is empty_
-  {% endif %}
-```
+Home Assistant endpoints (`/api/inventory`, `/api/grocery`) are unchanged in shape; items now include `active_barcode_id` and richer barcode product fields.
 
 ## Environment Variables
 
-Configure these in a `.env` file or pass to Docker:
-
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GEMINI_API_KEY` | No | Google Gemini API key for AI recipe/grocery suggestions |
-| `SPOONACULAR_API_KEY` | No | Spoonacular API key for recipe browsing |
-| `DATABASE_PATH` | No | Path to SQLite database (default: `/data/inventory.db`) |
+| `GEMINI_API_KEY` | No | Google Gemini API key (recipe suggestions + Dutch ingredient translation) |
+| `OFF_USER_AGENT` | No | User-Agent for Open Food Facts requests |
+| `DATABASE_PATH` | No | SQLite path (default `./data/inventory.db`, Docker: `/data/inventory.db`) |
 
-**Getting API Keys:**
-- **Gemini:** Visit [Google AI Studio](https://makersuite.google.com/app/apikey)
-- **Spoonacular:** Register at [Spoonacular](https://spoonacular.com/food-api)
+**Gemini key:** [Google AI Studio](https://aistudio.google.com/app/apikey)
 
 ## Data Storage
 
-- SQLite database stored at `/data/inventory.db` (in Docker)
-- Database persists via Docker volume `home_inventory_data`
-- To backup: `docker cp home-inventory:/data/inventory.db ./backup.db`
-- To restore: `docker cp ./backup.db home-inventory:/data/inventory.db`
+- SQLite at `/data/inventory.db` (Docker volume `home_inventory_data`)
+- Backup: `docker cp home-inventory:/data/inventory.db ./backup.db`
 
 ## Development
 
-Enable hot reload:
-
 ```bash
-# Without Docker
 uvicorn app.main:app --host 0.0.0.0 --port 4269 --reload
-
-# With Docker - uncomment dev volumes in docker-compose.yml
-docker-compose up
+.venv/bin/python -m pytest
 ```
 
-API documentation available at:
-- Swagger UI: `http://localhost:4269/docs`
-- ReDoc: `http://localhost:4269/redoc`
+Docs: `http://localhost:4269/docs`
 
 ## Camera Access
 
-The barcode scanner requires:
-- **HTTPS** or **localhost** (browsers block camera on plain HTTP)
-- For local network access, either:
-  - Access via `localhost` on the same machine
-  - Set up a reverse proxy with HTTPS (e.g., Caddy, nginx)
-  - On some browsers, add the IP to allowed insecure origins
-
-### Chrome Insecure Origin Flag (Development Only)
-
-```
-chrome://flags/#unsafely-treat-insecure-origin-as-secure
-```
-
-Add your server URL (e.g., `http://192.168.1.100:4269`) and restart Chrome.
-
-## Troubleshooting
-
-**Camera not working?**
-- Check browser permissions
-- Ensure HTTPS or localhost access
-- Try a different browser
-
-**Barcode not scanning?**
-- Ensure good lighting
-- Hold steady, fill the scan area
-- Try different angles
-
-**Database issues?**
-- Check volume mounts: `docker volume inspect home_inventory_data`
-- Verify permissions on `/data` directory
+Barcode scanning needs **HTTPS** or **localhost**. See certs via `generate-cert.sh` for local HTTPS.
 
 ## License
 
-MIT - Use freely for personal projects.
-
+MIT

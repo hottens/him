@@ -1,6 +1,16 @@
 """SQLAlchemy database models for inventory management."""
 
-from sqlalchemy import Column, Integer, String, ForeignKey, Enum as SQLEnum, Text, Boolean, DateTime
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Float,
+    ForeignKey,
+    Enum as SQLEnum,
+    Text,
+    Boolean,
+    DateTime,
+)
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -18,8 +28,9 @@ class ItemLocation(str, enum.Enum):
 class Item(Base):
     """
     An item that can be tracked in inventory or grocery list.
-    
+
     One item can have multiple barcodes (e.g., different sizes of same product).
+    The active barcode is the last scanned one, and can be overridden manually.
     """
     __tablename__ = "items"
 
@@ -30,19 +41,19 @@ class Item(Base):
         default=ItemLocation.NEITHER,
         nullable=False
     )
+    # No FK constraint — avoids circular dependency with barcodes.item_id
+    active_barcode_id = Column(Integer, nullable=True)
 
-    # One-to-many: one item can have multiple barcodes
     barcodes = relationship("Barcode", back_populates="item", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<Item(id={self.id}, name='{self.name}', location={self.location})>"
+        loc = self.location.value if self.location else None
+        return f"<Item(id={self.id}, name='{self.name}', location={loc})>"
 
 
 class Barcode(Base):
     """
-    A barcode that uniquely maps to one item.
-    
-    The barcode value is the scanned string (e.g., UPC, EAN, etc.).
+    A barcode that uniquely maps to one item, with optional Open Food Facts data.
     """
     __tablename__ = "barcodes"
 
@@ -50,11 +61,34 @@ class Barcode(Base):
     code = Column(String, nullable=False, unique=True, index=True)
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
 
-    # Many-to-one: many barcodes can belong to one item
+    # Open Food Facts product data (English source + Dutch translations)
+    product_name = Column(String, nullable=True)
+    brands = Column(String, nullable=True)
+    keywords = Column(Text, nullable=True)  # JSON list
+    ingredients_en = Column(Text, nullable=True)  # JSON list
+    ingredients_hierarchy_en = Column(Text, nullable=True)  # JSON list
+    ingredients_nl = Column(Text, nullable=True)  # JSON list
+    ingredients_hierarchy_nl = Column(Text, nullable=True)  # JSON list
+    allergens = Column(Text, nullable=True)  # JSON list
+    nutriments = Column(Text, nullable=True)  # JSON object
+    energy_kcal_100g = Column(Float, nullable=True)
+    energy_kcal_serving = Column(Float, nullable=True)
+
+    last_scanned_at = Column(DateTime, nullable=True)
+    product_fetched_at = Column(DateTime, nullable=True)
+
     item = relationship("Item", back_populates="barcodes")
 
     def __repr__(self):
         return f"<Barcode(id={self.id}, code='{self.code}', item_id={self.item_id})>"
+
+
+class Setting(Base):
+    """Simple key/value application settings."""
+    __tablename__ = "settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
 
 
 class Recipe(Base):
@@ -70,12 +104,10 @@ class Recipe(Base):
     prep_time_minutes = Column(Integer, nullable=True)
     cook_time_minutes = Column(Integer, nullable=True)
     is_favorite = Column(Boolean, default=False)
-    source_url = Column(String, nullable=True)  # Original source URL of the recipe
+    source_url = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # One-to-many: one recipe has multiple ingredients
     ingredients = relationship("RecipeIngredient", back_populates="recipe", cascade="all, delete-orphan")
-    # One-to-many: one recipe has multiple steps
     steps = relationship("RecipeStep", back_populates="recipe", cascade="all, delete-orphan")
 
     def __repr__(self):
@@ -85,29 +117,27 @@ class Recipe(Base):
 class RecipeIngredient(Base):
     """
     An ingredient in a recipe with amount and unit.
-    Can optionally be linked to an inventory Item for accurate availability tracking.
+    Can optionally be linked to an inventory Item for availability and nutrition.
     """
     __tablename__ = "recipe_ingredients"
 
     id = Column(Integer, primary_key=True, index=True)
     recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False)
-    name = Column(String, nullable=False)  # Ingredient name (may or may not match an Item)
-    amount = Column(String, nullable=True)  # e.g., "2", "1/2"
-    unit = Column(String, nullable=True)    # e.g., "cups", "tbsp", "pieces"
-    notes = Column(String, nullable=True)   # e.g., "diced", "room temperature"
-    item_id = Column(Integer, ForeignKey("items.id"), nullable=True)  # Optional link to inventory item
+    name = Column(String, nullable=False)
+    amount = Column(String, nullable=True)
+    unit = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
 
     recipe = relationship("Recipe", back_populates="ingredients")
-    matched_item = relationship("Item", foreign_keys=[item_id])  # The linked inventory item
+    matched_item = relationship("Item", foreign_keys=[item_id])
 
     def __repr__(self):
         return f"<RecipeIngredient(id={self.id}, name='{self.name}', item_id={self.item_id})>"
 
 
 class RecipeStep(Base):
-    """
-    A cooking step in a recipe.
-    """
+    """A cooking step in a recipe."""
     __tablename__ = "recipe_steps"
 
     id = Column(Integer, primary_key=True, index=True)

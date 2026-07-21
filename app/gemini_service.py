@@ -218,208 +218,80 @@ def is_configured() -> bool:
     return GEMINI_API_KEY is not None and len(GEMINI_API_KEY) > 0
 
 
-def translate_ingredients_to_english(ingredients: list[str]) -> list[str]:
+def _extract_json_text(response_text: str) -> str:
+    text = response_text.strip()
+    if "```json" in text:
+        return text.split("```json")[1].split("```")[0].strip()
+    if "```" in text:
+        return text.split("```")[1].split("```")[0].strip()
+    return text
+
+
+def translate_ingredients_to_dutch(
+    ingredients: list[str],
+    hierarchy: Optional[list[str]] = None,
+) -> dict:
     """
-    Translate ingredient names to English for Spoonacular API compatibility.
-    
-    Args:
-        ingredients: List of ingredient names (possibly in other languages)
-    
+    Translate English ingredient labels and hierarchy tags to Dutch.
+
     Returns:
-        List of ingredient names translated to English
+        {
+          "ingredients_nl": [...],
+          "ingredients_hierarchy_nl": [...]
+        }
     """
-    if not ingredients:
-        return []
-    
-    model = get_model()
-    
-    ingredients_str = "\n".join([f"- {ing}" for ing in ingredients])
-    
-    prompt = f"""Translate these ingredient/food item names to English. 
-If they are already in English, keep them as-is.
-Return ONLY a JSON array of strings with the English names, nothing else.
+    ingredients = ingredients or []
+    hierarchy = hierarchy or []
+    if not ingredients and not hierarchy:
+        return {"ingredients_nl": [], "ingredients_hierarchy_nl": []}
 
-Items to translate:
-{ingredients_str}
-
-Example output format:
-["milk", "eggs", "flour", "chicken breast"]
-
-Respond with ONLY the JSON array, no explanation."""
-
-    try:
-        response = model.generate_content(prompt)
-        response_text = response.text.strip()
-        
-        # Extract JSON from potential markdown wrapping
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        
-        import json
-        translated = json.loads(response_text)
-        
-        # Ensure we got a list of strings
-        if isinstance(translated, list):
-            return [str(item) for item in translated]
-        else:
-            return ingredients  # Fall back to original
-    except Exception as e:
-        # If translation fails, return original ingredients
-        print(f"Translation failed: {e}")
-        return ingredients
-
-
-def parse_spoonacular_recipe(spoonacular_data: dict) -> dict:
-    """
-    Use Gemini to parse a Spoonacular recipe into our clean local format.
-    
-    Translates the recipe to Dutch and converts units to European metric units.
-    
-    Args:
-        spoonacular_data: Raw recipe data from Spoonacular API
-    
-    Returns:
-        Dict containing parsed recipe in our format (in Dutch with metric units)
-    """
-    model = get_model()
-    
-    # Extract key information from Spoonacular data
-    title = spoonacular_data.get("title", "Unknown Recipe")
-    summary = spoonacular_data.get("summary", "")
-    instructions = spoonacular_data.get("instructions", "")
-    extended_ingredients = spoonacular_data.get("extendedIngredients", [])
-    analyzed_instructions = spoonacular_data.get("analyzedInstructions", [])
-    ready_in_minutes = spoonacular_data.get("readyInMinutes", 0)
-    servings = spoonacular_data.get("servings", 4)
-    
-    # Build ingredient text for Gemini
-    ingredients_text = "\n".join([
-        f"- {ing.get('original', ing.get('name', ''))}" 
-        for ing in extended_ingredients
-    ])
-    
-    # Build instructions text
-    if analyzed_instructions:
-        steps_text = "\n".join([
-            f"{step.get('number', i+1)}. {step.get('step', '')}"
-            for instr in analyzed_instructions
-            for i, step in enumerate(instr.get("steps", []))
-        ])
-    else:
-        steps_text = instructions or "No instructions provided."
-    
-    prompt = f"""Parse this recipe into a clean, structured format. 
-IMPORTANT: Translate EVERYTHING to Dutch and convert ALL measurements to European metric units.
-
-RECIPE: {title}
-
-SUMMARY:
-{summary[:500] if summary else 'No summary available.'}
-
-INGREDIENTS:
-{ingredients_text or 'No ingredients listed.'}
-
-INSTRUCTIONS:
-{steps_text}
-
-COOKING TIME: {ready_in_minutes} minutes total
-SERVINGS: {servings}
-
-TRANSLATION AND CONVERSION REQUIREMENTS:
-1. Translate the recipe name, description, ingredient names, notes, and all instructions to DUTCH
-2. Convert ALL units to European metric:
-   - cups → ml or gram (1 cup = 240ml for liquids, weight in grams for solids)
-   - oz → gram (1 oz = 28g)
-   - lb → gram or kg (1 lb = 454g)
-   - tbsp → ml or eetlepel (1 tbsp = 15ml)
-   - tsp → ml or theelepel (1 tsp = 5ml)
-   - fl oz → ml (1 fl oz = 30ml)
-   - inches → cm
-   - Fahrenheit → Celsius (°C = (°F - 32) × 5/9)
-3. Use Dutch cooking terms (e.g., "fry" → "bakken", "bake" → "bakken in de oven")
-
-For ingredients:
-- Translate the ingredient name to Dutch
-- Convert and round amounts to practical metric values
-- Use metric units (gram, ml, stuks, eetlepel, theelepel)
-- Translate preparation notes to Dutch (e.g., "diced" → "in blokjes")
-
-For steps:
-- Translate each step to Dutch
-- Convert any temperatures or measurements in the instructions
-
-IMPORTANT: Respond ONLY with valid JSON in this exact format:
-{{
-  "name": "Dutch recipe name",
-  "description": "Een korte beschrijving van het gerecht in het Nederlands",
-  "servings": {servings},
-  "prep_time_minutes": null,
-  "cook_time_minutes": {ready_in_minutes or 'null'},
-  "ingredients": [
-    {{"name": "Nederlandse ingrediëntnaam", "amount": "200", "unit": "gram", "notes": "in blokjes"}}
-  ],
-  "steps": [
-    {{"step_number": 1, "instruction": "Nederlandse instructie..."}}
-  ]
-}}
-
-Make the description appetizing in Dutch. Ensure all ingredients are parsed and converted correctly."""
-
-    try:
-        response = model.generate_content(prompt)
-        response_text = response.text.strip()
-        
-        # Extract JSON from potential markdown wrapping
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        
-        result = json.loads(response_text)
-        
-        # Add source info
-        result["source_url"] = spoonacular_data.get("sourceUrl")
-        result["image_url"] = spoonacular_data.get("image")
-        result["spoonacular_id"] = spoonacular_data.get("id")
-        
-        return result
-    except json.JSONDecodeError as e:
-        # Fall back to basic parsing if Gemini fails
+    if not is_configured():
         return {
-            "error": f"Gemini parsing failed: {str(e)}",
-            "name": title,
-            "description": summary[:200] if summary else None,
-            "servings": servings,
-            "prep_time_minutes": None,
-            "cook_time_minutes": ready_in_minutes,
-            "ingredients": [
-                {"name": ing.get("name", ""), "amount": str(ing.get("amount", "")), 
-                 "unit": ing.get("unit", ""), "notes": None}
-                for ing in extended_ingredients
-            ],
-            "steps": [
-                {"step_number": i+1, "instruction": step.get("step", "")}
-                for instr in analyzed_instructions
-                for i, step in enumerate(instr.get("steps", []))
-            ] if analyzed_instructions else [{"step_number": 1, "instruction": instructions or "See source for instructions."}],
-            "source_url": spoonacular_data.get("sourceUrl"),
-            "image_url": spoonacular_data.get("image"),
-            "spoonacular_id": spoonacular_data.get("id")
+            "ingredients_nl": list(ingredients),
+            "ingredients_hierarchy_nl": list(hierarchy),
+        }
+
+    model = get_model()
+    prompt = f"""Translate these Open Food Facts ingredient labels from English to Dutch.
+Keep food taxonomy sense (e.g. "milk" → "melk", "animal based rennet" → "dierlijk stremsel").
+Preserve list length and order exactly. If already Dutch, keep as-is.
+
+INGREDIENTS (JSON array):
+{json.dumps(ingredients, ensure_ascii=False)}
+
+HIERARCHY (JSON array):
+{json.dumps(hierarchy, ensure_ascii=False)}
+
+Respond ONLY with valid JSON:
+{{
+  "ingredients_nl": ["..."],
+  "ingredients_hierarchy_nl": ["..."]
+}}"""
+
+    try:
+        response = model.generate_content(prompt)
+        result = json.loads(_extract_json_text(response.text))
+        ingredients_nl = result.get("ingredients_nl")
+        hierarchy_nl = result.get("ingredients_hierarchy_nl")
+        if not isinstance(ingredients_nl, list):
+            ingredients_nl = list(ingredients)
+        if not isinstance(hierarchy_nl, list):
+            hierarchy_nl = list(hierarchy)
+        # Pad/truncate to original lengths
+        ingredients_nl = [str(x) for x in ingredients_nl][: len(ingredients)]
+        while len(ingredients_nl) < len(ingredients):
+            ingredients_nl.append(ingredients[len(ingredients_nl)])
+        hierarchy_nl = [str(x) for x in hierarchy_nl][: len(hierarchy)]
+        while len(hierarchy_nl) < len(hierarchy):
+            hierarchy_nl.append(hierarchy[len(hierarchy_nl)])
+        return {
+            "ingredients_nl": ingredients_nl,
+            "ingredients_hierarchy_nl": hierarchy_nl,
         }
     except Exception as e:
+        print(f"Dutch translation failed: {e}")
         return {
-            "error": str(e),
-            "name": title,
-            "description": None,
-            "servings": servings,
-            "prep_time_minutes": None,
-            "cook_time_minutes": ready_in_minutes,
-            "ingredients": [],
-            "steps": [],
-            "source_url": spoonacular_data.get("sourceUrl"),
-            "image_url": spoonacular_data.get("image"),
-            "spoonacular_id": spoonacular_data.get("id")
+            "ingredients_nl": list(ingredients),
+            "ingredients_hierarchy_nl": list(hierarchy),
         }
 

@@ -751,16 +751,6 @@ class TestHealthCheckExtended:
         # Will be False in test environment without API key
         assert data["gemini_configured"] is False
 
-    def test_health_check_includes_spoonacular_status(self, client):
-        """Test that health check includes Spoonacular configuration status."""
-        response = client.get("/api/health")
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert "spoonacular_configured" in data
-        # Will be False in test environment without API key
-        assert data["spoonacular_configured"] is False
-
 
 class TestRecipeFullUpdate:
     """Tests for the full recipe update endpoint."""
@@ -901,40 +891,6 @@ class TestIngredientMatching:
         
         assert recipe["ingredients"][0]["item_id"] is None
         assert recipe["ingredients"][0]["matched_item"] is None
-
-
-class TestSpoonacularEndpoints:
-    """Tests for Spoonacular API endpoints (without actual API calls)."""
-
-    def test_spoonacular_recipe_detail_no_api_key(self, client):
-        """Test getting Spoonacular recipe detail when API key is not set."""
-        response = client.get("/api/spoonacular/recipe/12345")
-        
-        assert response.status_code == 503
-
-    def test_spoonacular_discover_no_api_key(self, client, sample_items):
-        """Test discovering recipes by ingredients when API key is not set."""
-        response = client.post(
-            "/api/spoonacular/discover",
-            json={"number": 5}
-        )
-        
-        assert response.status_code == 503
-
-    def test_spoonacular_import_no_api_key(self, client):
-        """Test importing Spoonacular recipe when API key is not set."""
-        response = client.post("/api/spoonacular/import/12345")
-        
-        assert response.status_code == 503
-
-    def test_import_url_no_api_key(self, client):
-        """Test importing recipe from URL when API key is not set."""
-        response = client.post(
-            "/api/recipes/import-url",
-            json={"url": "https://example.com/recipe"}
-        )
-        
-        assert response.status_code == 503
 
 
 class TestAIEndpoints:

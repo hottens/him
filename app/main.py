@@ -18,29 +18,52 @@ from .database import engine, get_db, Base
 from .models import Item, Barcode, ItemLocation, Recipe, RecipeIngredient, RecipeStep
 from . import schemas
 from . import gemini_service
-from . import spoonacular_service
+from . import enrichment
+from . import product_data
+from . import openfoodfacts_service
+from .serializers import serialize_item, serialize_recipe, serialize_barcode, recipe_nutrition_summary
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
-# Run migrations for new columns (SQLAlchemy create_all doesn't add columns to existing tables)
+
+def _add_column_if_missing(conn, table: str, column: str, col_type: str) -> None:
+    result = conn.execute(text(f"PRAGMA table_info({table})"))
+    columns = [row[1] for row in result.fetchall()]
+    if column not in columns:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+
+
 def run_migrations():
     """Add new columns to existing tables if they don't exist."""
     with engine.connect() as conn:
-        # Check and add source_url column to recipes table
-        result = conn.execute(text("PRAGMA table_info(recipes)"))
-        columns = [row[1] for row in result.fetchall()]
-        
-        if "source_url" not in columns:
-            conn.execute(text("ALTER TABLE recipes ADD COLUMN source_url VARCHAR"))
-            conn.commit()
+        _add_column_if_missing(conn, "recipes", "source_url", "VARCHAR")
+        _add_column_if_missing(conn, "items", "active_barcode_id", "INTEGER")
+        for col, typ in [
+            ("product_name", "VARCHAR"),
+            ("brands", "VARCHAR"),
+            ("keywords", "TEXT"),
+            ("ingredients_en", "TEXT"),
+            ("ingredients_hierarchy_en", "TEXT"),
+            ("ingredients_nl", "TEXT"),
+            ("ingredients_hierarchy_nl", "TEXT"),
+            ("allergens", "TEXT"),
+            ("nutriments", "TEXT"),
+            ("energy_kcal_100g", "FLOAT"),
+            ("energy_kcal_serving", "FLOAT"),
+            ("last_scanned_at", "DATETIME"),
+            ("product_fetched_at", "DATETIME"),
+        ]:
+            _add_column_if_missing(conn, "barcodes", col, typ)
+        conn.commit()
+
 
 run_migrations()
 
 app = FastAPI(
     title="Home Inventory Manager",
     description="Local-first inventory and grocery list management with barcode scanning",
-    version="2.0.0"
+    version="2.1.0"
 )
 
 # --- Static Files ---
@@ -64,8 +87,29 @@ async def health_check():
     return {
         "status": "healthy",
         "gemini_configured": gemini_service.is_configured(),
-        "spoonacular_configured": spoonacular_service.is_configured()
     }
+
+
+# --- Settings ---
+
+@app.get("/api/settings", response_model=schemas.SettingsResponse)
+async def get_settings(db: Session = Depends(get_db)):
+    settings = product_data.get_all_settings(db)
+    return schemas.SettingsResponse(
+        auto_fetch_products=settings.get("auto_fetch_products", "true").lower() in {"1", "true", "yes", "on"},
+        translate_ingredients=settings.get("translate_ingredients", "true").lower() in {"1", "true", "yes", "on"},
+        gemini_configured=gemini_service.is_configured(),
+    )
+
+
+@app.patch("/api/settings", response_model=schemas.SettingsResponse)
+async def update_settings(update: schemas.SettingsUpdate, db: Session = Depends(get_db)):
+    if update.auto_fetch_products is not None:
+        product_data.set_setting(db, "auto_fetch_products", "true" if update.auto_fetch_products else "false")
+    if update.translate_ingredients is not None:
+        product_data.set_setting(db, "translate_ingredients", "true" if update.translate_ingredients else "false")
+    db.commit()
+    return await get_settings(db)
 
 
 # --- Barcode Endpoints ---
@@ -74,19 +118,40 @@ async def health_check():
 async def lookup_barcode(code: str, db: Session = Depends(get_db)):
     """
     Look up a barcode and return the associated item if found.
-    
-    Used by the scanner to check if a barcode is already registered.
+
+    Marks the barcode as last-scanned (active) and optionally enriches from Open Food Facts.
     """
     barcode = db.query(Barcode).filter(Barcode.code == code).first()
-    
+
     if barcode:
+        product_data.mark_barcode_scanned(db, barcode)
+        if product_data.setting_is_true(db, "auto_fetch_products") and barcode.product_fetched_at is None:
+            enrichment.enrich_barcode(db, barcode)
+        db.commit()
+        db.refresh(barcode.item)
         return schemas.BarcodeLookupResponse(
             found=True,
             barcode=code,
-            item=barcode.item
+            item=serialize_item(barcode.item),
         )
-    
-    return schemas.BarcodeLookupResponse(found=False, barcode=code)
+
+    # Unknown barcode: ask Open Food Facts so the UI can pre-fill the name
+    suggested_name = None
+    suggested_brands = None
+    try:
+        product = openfoodfacts_service.fetch_product(code)
+        if product:
+            suggested_name = product.get("product_name") or None
+            suggested_brands = product.get("brands") or None
+    except Exception:
+        pass
+
+    return schemas.BarcodeLookupResponse(
+        found=False,
+        barcode=code,
+        suggested_name=suggested_name,
+        suggested_brands=suggested_brands,
+    )
 
 
 @app.post("/api/barcode/associate", response_model=schemas.ItemResponse)
@@ -94,31 +159,64 @@ async def associate_barcode(
     request: schemas.AssociateBarcodeRequest,
     db: Session = Depends(get_db)
 ):
-    """
-    Associate a barcode with an existing item.
-    
-    Used when scanning a new barcode for an item that already exists.
-    """
-    # Check if barcode already exists
+    """Associate a barcode with an existing item."""
     existing = db.query(Barcode).filter(Barcode.code == request.barcode).first()
     if existing:
         raise HTTPException(
             status_code=400,
             detail=f"Barcode already associated with item: {existing.item.name}"
         )
-    
-    # Find the item
+
     item = db.query(Item).filter(Item.id == request.item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    
-    # Create the barcode association
+
     barcode = Barcode(code=request.barcode, item_id=item.id)
     db.add(barcode)
+    db.flush()
+    product_data.mark_barcode_scanned(db, barcode)
+    if product_data.setting_is_true(db, "auto_fetch_products"):
+        enrichment.enrich_barcode(db, barcode)
     db.commit()
     db.refresh(item)
-    
-    return item
+    return serialize_item(item)
+
+
+@app.post("/api/barcodes/reload-all", response_model=schemas.BarcodeReloadResult)
+async def reload_all_barcodes(db: Session = Depends(get_db)):
+    """Fetch Open Food Facts data for every barcode (settings → reload)."""
+    barcodes = db.query(Barcode).all()
+    updated = not_found = errors = 0
+    for barcode in barcodes:
+        result = enrichment.enrich_barcode(db, barcode)
+        if not result["ok"]:
+            errors += 1
+        elif result["found"]:
+            updated += 1
+        else:
+            not_found += 1
+    db.commit()
+    return schemas.BarcodeReloadResult(
+        total=len(barcodes),
+        updated=updated,
+        not_found=not_found,
+        errors=errors,
+    )
+
+
+@app.post("/api/barcodes/{barcode_id}/fetch", response_model=schemas.BarcodeResponse)
+async def fetch_barcode_product(barcode_id: int, db: Session = Depends(get_db)):
+    """Fetch/refresh Open Food Facts data for a single barcode."""
+    barcode = db.query(Barcode).filter(Barcode.id == barcode_id).first()
+    if not barcode:
+        raise HTTPException(status_code=404, detail="Barcode not found")
+    result = enrichment.enrich_barcode(db, barcode)
+    if not result["ok"]:
+        raise HTTPException(status_code=502, detail=result.get("error") or "Fetch failed")
+    db.commit()
+    db.refresh(barcode)
+    active_id = barcode.item.active_barcode_id if barcode.item else None
+    return serialize_barcode(barcode, active_id)
 
 
 # --- Item Endpoints ---
@@ -128,29 +226,23 @@ async def list_items(
     location: Optional[ItemLocation] = None,
     db: Session = Depends(get_db)
 ):
-    """
-    List all items, optionally filtered by location.
-    """
+    """List all items, optionally filtered by location."""
     query = db.query(Item)
     if location:
         query = query.filter(Item.location == location)
-    return query.order_by(Item.name).all()
+    return [serialize_item(item) for item in query.order_by(Item.name).all()]
 
 
 @app.post("/api/items", response_model=schemas.ItemResponse)
 async def create_item(item: schemas.ItemCreate, db: Session = Depends(get_db)):
-    """
-    Create a new item, optionally with an associated barcode.
-    """
-    # Check if item name already exists
+    """Create a new item, optionally with an associated barcode."""
     existing = db.query(Item).filter(Item.name == item.name).first()
     if existing:
         raise HTTPException(
             status_code=400,
             detail=f"Item with name '{item.name}' already exists"
         )
-    
-    # Check if barcode already exists
+
     if item.barcode:
         existing_barcode = db.query(Barcode).filter(Barcode.code == item.barcode).first()
         if existing_barcode:
@@ -158,21 +250,22 @@ async def create_item(item: schemas.ItemCreate, db: Session = Depends(get_db)):
                 status_code=400,
                 detail=f"Barcode already associated with item: {existing_barcode.item.name}"
             )
-    
-    # Create the item
+
     db_item = Item(name=item.name, location=item.location)
     db.add(db_item)
-    db.flush()  # Get the item ID
-    
-    # Associate barcode if provided
+    db.flush()
+
     if item.barcode:
         barcode = Barcode(code=item.barcode, item_id=db_item.id)
         db.add(barcode)
-    
+        db.flush()
+        product_data.mark_barcode_scanned(db, barcode)
+        if product_data.setting_is_true(db, "auto_fetch_products"):
+            enrichment.enrich_barcode(db, barcode)
+
     db.commit()
     db.refresh(db_item)
-    
-    return db_item
+    return serialize_item(db_item)
 
 
 @app.get("/api/items/{item_id}", response_model=schemas.ItemResponse)
@@ -181,7 +274,7 @@ async def get_item(item_id: int, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    return item
+    return serialize_item(item)
 
 
 @app.patch("/api/items/{item_id}", response_model=schemas.ItemResponse)
@@ -190,13 +283,12 @@ async def update_item(
     update: schemas.ItemUpdate,
     db: Session = Depends(get_db)
 ):
-    """Update an item's name or location."""
+    """Update an item's name, location, or active barcode."""
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    
+
     if update.name is not None:
-        # Check for duplicate name
         existing = db.query(Item).filter(
             Item.name == update.name,
             Item.id != item_id
@@ -207,14 +299,44 @@ async def update_item(
                 detail=f"Item with name '{update.name}' already exists"
             )
         item.name = update.name
-    
+
     if update.location is not None:
         item.location = update.location
-    
+
+    if update.active_barcode_id is not None:
+        barcode = db.query(Barcode).filter(
+            Barcode.id == update.active_barcode_id,
+            Barcode.item_id == item.id,
+        ).first()
+        if not barcode:
+            raise HTTPException(status_code=400, detail="Barcode does not belong to this item")
+        item.active_barcode_id = barcode.id
+
     db.commit()
     db.refresh(item)
-    
-    return item
+    return serialize_item(item)
+
+
+@app.post("/api/items/{item_id}/active-barcode", response_model=schemas.ItemResponse)
+async def set_active_barcode(
+    item_id: int,
+    request: schemas.SetActiveBarcodeRequest,
+    db: Session = Depends(get_db),
+):
+    """Manually set which barcode is active for an item."""
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    barcode = db.query(Barcode).filter(
+        Barcode.id == request.barcode_id,
+        Barcode.item_id == item.id,
+    ).first()
+    if not barcode:
+        raise HTTPException(status_code=400, detail="Barcode does not belong to this item")
+    item.active_barcode_id = barcode.id
+    db.commit()
+    db.refresh(item)
+    return serialize_item(item)
 
 
 @app.delete("/api/items/{item_id}")
@@ -238,12 +360,11 @@ async def move_to_inventory(item_id: int, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    
+
     item.location = ItemLocation.INVENTORY
     db.commit()
     db.refresh(item)
-    
-    return item
+    return serialize_item(item)
 
 
 @app.post("/api/items/{item_id}/to-grocery", response_model=schemas.ItemResponse)
@@ -252,12 +373,11 @@ async def move_to_grocery(item_id: int, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    
+
     item.location = ItemLocation.GROCERY_LIST
     db.commit()
     db.refresh(item)
-    
-    return item
+    return serialize_item(item)
 
 
 @app.post("/api/items/{item_id}/remove", response_model=schemas.ItemResponse)
@@ -266,42 +386,37 @@ async def remove_from_lists(item_id: int, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    
+
     item.location = ItemLocation.NEITHER
     db.commit()
     db.refresh(item)
-    
-    return item
+    return serialize_item(item)
 
 
 # --- Home Assistant Friendly Endpoints ---
 
 @app.get("/api/inventory", response_model=schemas.InventoryListResponse)
 async def get_inventory(db: Session = Depends(get_db)):
-    """
-    Get all items currently in inventory.
-    
-    Returns a clean JSON response suitable for Home Assistant REST sensors.
-    """
+    """Get all items currently in inventory."""
     items = db.query(Item).filter(
         Item.location == ItemLocation.INVENTORY
     ).order_by(Item.name).all()
-    
-    return schemas.InventoryListResponse(count=len(items), items=items)
+    return schemas.InventoryListResponse(
+        count=len(items),
+        items=[serialize_item(i) for i in items],
+    )
 
 
 @app.get("/api/grocery", response_model=schemas.GroceryListResponse)
 async def get_grocery_list(db: Session = Depends(get_db)):
-    """
-    Get all items on the grocery list.
-    
-    Returns a clean JSON response suitable for Home Assistant REST sensors.
-    """
+    """Get all items on the grocery list."""
     items = db.query(Item).filter(
         Item.location == ItemLocation.GROCERY_LIST
     ).order_by(Item.name).all()
-    
-    return schemas.GroceryListResponse(count=len(items), items=items)
+    return schemas.GroceryListResponse(
+        count=len(items),
+        items=[serialize_item(i) for i in items],
+    )
 
 
 # --- Search ---
@@ -312,8 +427,7 @@ async def search_items(q: str, db: Session = Depends(get_db)):
     items = db.query(Item).filter(
         Item.name.ilike(f"%{q}%")
     ).order_by(Item.name).all()
-    
-    return items
+    return [serialize_item(i) for i in items]
 
 
 # --- Recipe Endpoints ---
@@ -328,7 +442,10 @@ async def list_recipes(
     if favorites_only:
         query = query.filter(Recipe.is_favorite.is_(True))
     recipes = query.order_by(Recipe.created_at.desc()).all()
-    return schemas.RecipeListResponse(count=len(recipes), recipes=recipes)
+    return schemas.RecipeListResponse(
+        count=len(recipes),
+        recipes=[serialize_recipe(r) for r in recipes],
+    )
 
 
 @app.post("/api/recipes", response_model=schemas.RecipeResponse)
@@ -340,36 +457,32 @@ async def create_recipe(recipe: schemas.RecipeCreate, db: Session = Depends(get_
         servings=recipe.servings,
         prep_time_minutes=recipe.prep_time_minutes,
         cook_time_minutes=recipe.cook_time_minutes,
+        source_url=recipe.source_url,
         is_favorite=recipe.is_favorite
     )
     db.add(db_recipe)
     db.flush()
-    
-    # Add ingredients
+
     for ing in recipe.ingredients:
-        db_ingredient = RecipeIngredient(
+        db.add(RecipeIngredient(
             recipe_id=db_recipe.id,
             name=ing.name,
             amount=ing.amount,
             unit=ing.unit,
             notes=ing.notes,
             item_id=ing.item_id
-        )
-        db.add(db_ingredient)
-    
-    # Add steps
+        ))
+
     for step in recipe.steps:
-        db_step = RecipeStep(
+        db.add(RecipeStep(
             recipe_id=db_recipe.id,
             step_number=step.step_number,
             instruction=step.instruction
-        )
-        db.add(db_step)
-    
+        ))
+
     db.commit()
     db.refresh(db_recipe)
-    
-    return db_recipe
+    return serialize_recipe(db_recipe)
 
 
 @app.get("/api/recipes/{recipe_id}", response_model=schemas.RecipeResponse)
@@ -378,7 +491,7 @@ async def get_recipe(recipe_id: int, db: Session = Depends(get_db)):
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    return recipe
+    return serialize_recipe(recipe)
 
 
 @app.patch("/api/recipes/{recipe_id}", response_model=schemas.RecipeResponse)
@@ -391,14 +504,13 @@ async def update_recipe(
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    
+
     for field, value in update.model_dump(exclude_unset=True).items():
         setattr(recipe, field, value)
-    
+
     db.commit()
     db.refresh(recipe)
-    
-    return recipe
+    return serialize_recipe(recipe)
 
 
 @app.put("/api/recipes/{recipe_id}", response_model=schemas.RecipeResponse)
@@ -411,47 +523,37 @@ async def update_recipe_full(
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    
-    # Update basic fields
+
     update_data = update.model_dump(exclude_unset=True)
-    
-    for field in ['name', 'description', 'servings', 'prep_time_minutes', 'cook_time_minutes', 'is_favorite']:
+
+    for field in ['name', 'description', 'servings', 'prep_time_minutes', 'cook_time_minutes', 'is_favorite', 'source_url']:
         if field in update_data and update_data[field] is not None:
             setattr(recipe, field, update_data[field])
-    
-    # Update ingredients if provided
+
     if update.ingredients is not None:
-        # Delete existing ingredients
         db.query(RecipeIngredient).filter(RecipeIngredient.recipe_id == recipe_id).delete()
-        # Add new ingredients
         for ing in update.ingredients:
-            db_ingredient = RecipeIngredient(
+            db.add(RecipeIngredient(
                 recipe_id=recipe_id,
                 name=ing.name,
                 amount=ing.amount,
                 unit=ing.unit,
                 notes=ing.notes,
                 item_id=ing.item_id
-            )
-            db.add(db_ingredient)
-    
-    # Update steps if provided
+            ))
+
     if update.steps is not None:
-        # Delete existing steps
         db.query(RecipeStep).filter(RecipeStep.recipe_id == recipe_id).delete()
-        # Add new steps
         for step in update.steps:
-            db_step = RecipeStep(
+            db.add(RecipeStep(
                 recipe_id=recipe_id,
                 step_number=step.step_number,
                 instruction=step.instruction
-            )
-            db.add(db_step)
-    
+            ))
+
     db.commit()
     db.refresh(recipe)
-    
-    return recipe
+    return serialize_recipe(recipe)
 
 
 @app.delete("/api/recipes/{recipe_id}")
@@ -460,10 +562,9 @@ async def delete_recipe(recipe_id: int, db: Session = Depends(get_db)):
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    
+
     db.delete(recipe)
     db.commit()
-    
     return {"deleted": True, "id": recipe_id}
 
 
@@ -473,12 +574,11 @@ async def toggle_favorite(recipe_id: int, db: Session = Depends(get_db)):
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    
+
     recipe.is_favorite = not recipe.is_favorite
     db.commit()
     db.refresh(recipe)
-    
-    return recipe
+    return serialize_recipe(recipe)
 
 
 # --- Gemini AI Endpoints ---
@@ -571,215 +671,6 @@ async def get_grocery_suggestions(
     
     return result
 
-
-# --- Spoonacular API Endpoints ---
-# Uses search_by_ingredients as the primary discovery method
-
-@app.get("/api/spoonacular/recipe/{recipe_id}")
-async def spoonacular_get_recipe(recipe_id: int):
-    """
-    Get detailed recipe information from Spoonacular.
-    
-    Requires SPOONACULAR_API_KEY environment variable to be set.
-    """
-    if not spoonacular_service.is_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Spoonacular API is not configured. Set SPOONACULAR_API_KEY environment variable."
-        )
-    
-    result = spoonacular_service.get_recipe_details(recipe_id)
-    
-    if "error" in result:
-        raise HTTPException(status_code=500, detail=result["error"])
-    
-    return result
-
-
-@app.post("/api/spoonacular/discover")
-async def spoonacular_discover_recipes(
-    request: schemas.SpoonacularByIngredientsRequest,
-    db: Session = Depends(get_db)
-):
-    """
-    Discover recipes based on current inventory ingredients.
-    
-    This is the primary way to find recipes - based on what you have.
-    Translates ingredients to English using Gemini before searching.
-    Requires SPOONACULAR_API_KEY environment variable to be set.
-    """
-    if not spoonacular_service.is_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Spoonacular API is not configured. Set SPOONACULAR_API_KEY environment variable."
-        )
-    
-    # Get inventory items
-    inventory_items = db.query(Item).filter(
-        Item.location == ItemLocation.INVENTORY
-    ).all()
-    ingredient_names = [item.name for item in inventory_items]
-    
-    if not ingredient_names:
-        raise HTTPException(
-            status_code=400,
-            detail="No items in inventory. Add some items first."
-        )
-    
-    # Translate ingredients to English using Gemini if configured
-    if gemini_service.is_configured():
-        english_ingredients = gemini_service.translate_ingredients_to_english(ingredient_names)
-    else:
-        english_ingredients = ingredient_names
-    
-    result = spoonacular_service.search_by_ingredients(
-        ingredients=english_ingredients,
-        number=request.number
-    )
-    
-    return {
-        "recipes": result,
-        "ingredients_used": ingredient_names,
-        "ingredients_english": english_ingredients
-    }
-
-
-@app.post("/api/spoonacular/import/{recipe_id}", response_model=schemas.RecipeResponse)
-async def import_spoonacular_recipe(recipe_id: int, db: Session = Depends(get_db)):
-    """
-    Import a Spoonacular recipe into the local database.
-    
-    Fetches recipe details from Spoonacular, uses Gemini to parse it
-    into our clean format, then saves locally.
-    """
-    if not spoonacular_service.is_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Spoonacular API is not configured. Set SPOONACULAR_API_KEY environment variable."
-        )
-    
-    # Get recipe details from Spoonacular
-    spoon_recipe = spoonacular_service.get_recipe_details(recipe_id)
-    
-    if "error" in spoon_recipe:
-        raise HTTPException(status_code=500, detail=spoon_recipe["error"])
-    
-    # Use Gemini to parse if configured, otherwise fall back to basic parsing
-    if gemini_service.is_configured():
-        local_data = gemini_service.parse_spoonacular_recipe(spoon_recipe)
-    else:
-        local_data = spoonacular_service.convert_to_local_recipe(spoon_recipe)
-    
-    # Create the recipe
-    db_recipe = Recipe(
-        name=local_data["name"],
-        description=local_data.get("description"),
-        servings=local_data.get("servings", 4),
-        prep_time_minutes=local_data.get("prep_time_minutes"),
-        cook_time_minutes=local_data.get("cook_time_minutes"),
-        source_url=local_data.get("source_url") or spoon_recipe.get("sourceUrl"),
-        is_favorite=False
-    )
-    db.add(db_recipe)
-    db.flush()
-    
-    # Add ingredients
-    for ing in local_data.get("ingredients", []):
-        db_ingredient = RecipeIngredient(
-            recipe_id=db_recipe.id,
-            name=ing["name"],
-            amount=ing.get("amount"),
-            unit=ing.get("unit"),
-            notes=ing.get("notes")
-        )
-        db.add(db_ingredient)
-    
-    # Add steps
-    for step in local_data.get("steps", []):
-        db_step = RecipeStep(
-            recipe_id=db_recipe.id,
-            step_number=step["step_number"],
-            instruction=step["instruction"]
-        )
-        db.add(db_step)
-    
-    db.commit()
-    db.refresh(db_recipe)
-    
-    return db_recipe
-
-
-class ImportUrlRequest(schemas.BaseModel):
-    """Request to import a recipe from a URL."""
-    url: str
-
-
-@app.post("/api/recipes/import-url", response_model=schemas.RecipeResponse)
-async def import_recipe_from_url(request: ImportUrlRequest, db: Session = Depends(get_db)):
-    """
-    Import a recipe from any website URL.
-    
-    Uses Spoonacular to extract recipe data from the URL,
-    then uses Gemini to parse it into our clean format.
-    """
-    if not spoonacular_service.is_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Spoonacular API is not configured. Set SPOONACULAR_API_KEY environment variable."
-        )
-    
-    # Extract recipe from URL using Spoonacular
-    extracted = spoonacular_service.extract_recipe_from_url(request.url)
-    
-    if "error" in extracted:
-        raise HTTPException(status_code=500, detail=f"Failed to extract recipe: {extracted['error']}")
-    
-    if not extracted.get("title"):
-        raise HTTPException(status_code=400, detail="Could not extract recipe from this URL")
-    
-    # Use Gemini to parse if configured, otherwise fall back to basic parsing
-    if gemini_service.is_configured():
-        local_data = gemini_service.parse_spoonacular_recipe(extracted)
-    else:
-        local_data = spoonacular_service.convert_to_local_recipe(extracted)
-    
-    # Create the recipe
-    db_recipe = Recipe(
-        name=local_data["name"],
-        description=local_data.get("description"),
-        servings=local_data.get("servings", 4),
-        prep_time_minutes=local_data.get("prep_time_minutes"),
-        cook_time_minutes=local_data.get("cook_time_minutes"),
-        source_url=local_data.get("source_url") or request.url,
-        is_favorite=False
-    )
-    db.add(db_recipe)
-    db.flush()
-    
-    # Add ingredients
-    for ing in local_data.get("ingredients", []):
-        db_ingredient = RecipeIngredient(
-            recipe_id=db_recipe.id,
-            name=ing.get("name", ""),
-            amount=ing.get("amount"),
-            unit=ing.get("unit"),
-            notes=ing.get("notes")
-        )
-        db.add(db_ingredient)
-    
-    # Add steps
-    for step in local_data.get("steps", []):
-        db_step = RecipeStep(
-            recipe_id=db_recipe.id,
-            step_number=step.get("step_number", 1),
-            instruction=step.get("instruction", "")
-        )
-        db.add(db_step)
-    
-    db.commit()
-    db.refresh(db_recipe)
-    
-    return db_recipe
 
 
 # --- Beautiful Recipe View Page ---
@@ -885,7 +776,48 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             </button>
         </div>
         '''
-    
+
+    nutrition = recipe_nutrition_summary(recipe)
+    totals = nutrition.totals
+    nutrition_rows = []
+    labels = [
+        ("energy_kcal", "Energy", "kcal"),
+        ("proteins", "Protein", "g"),
+        ("carbohydrates", "Carbs", "g"),
+        ("fat", "Fat", "g"),
+        ("saturated-fat", "Saturated fat", "g"),
+        ("sugars", "Sugars", "g"),
+        ("fiber", "Fiber", "g"),
+        ("salt", "Salt", "g"),
+    ]
+    for key, label, unit in labels:
+        if key in totals:
+            nutrition_rows.append(
+                f"<div class='nutrition-row'><span>{label}</span><span>{totals[key]} {unit}</span></div>"
+            )
+    allergens_html = ""
+    if nutrition.allergens:
+        chips = "".join(f"<span class='allergen-chip'>{a}</span>" for a in nutrition.allergens)
+        allergens_html = f"<div class='allergens'><div class='allergens-label'>Allergens</div><div class='allergen-chips'>{chips}</div></div>"
+    if nutrition_rows or allergens_html:
+        skipped_note = ""
+        if nutrition.ingredients_skipped:
+            skipped_note = (
+                f"<p class='nutrition-note'>Geen voedingswaarde meegenomen voor: "
+                f"{', '.join(nutrition.ingredients_skipped)}</p>"
+            )
+        nutrition_html = f"""
+        <h2>Nutrition</h2>
+        <p class="nutrition-note">Opgeteld uit gekoppelde producten (actieve barcode), waar hoeveelheid in gram beschikbaar is.</p>
+        <div class="nutrition-box">
+            {''.join(nutrition_rows) if nutrition_rows else '<p class="nutrition-note">Nog geen kcal/macros beschikbaar.</p>'}
+        </div>
+        {allergens_html}
+        {skipped_note}
+        """
+    else:
+        nutrition_html = ""
+
     html = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -1082,6 +1014,43 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             color: var(--text-muted);
             font-size: 0.85rem;
             font-style: italic;
+        }}
+
+        .nutrition-box {{
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1rem;
+        }}
+        .nutrition-row {{
+            display: flex;
+            justify-content: space-between;
+            padding: 0.4rem 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.95rem;
+        }}
+        .nutrition-row:last-child {{ border-bottom: none; }}
+        .nutrition-note {{
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin: 0.5rem 0 1rem;
+        }}
+        .allergens {{ margin: 1rem 0; }}
+        .allergens-label {{
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }}
+        .allergen-chips {{ display: flex; flex-wrap: wrap; gap: 0.4rem; }}
+        .allergen-chip {{
+            background: #fde8e4;
+            color: #9a3412;
+            padding: 0.25rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.8rem;
         }}
         
         /* Clickable ingredient styling */
@@ -1611,6 +1580,8 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 {ingredients_html}
             </ul>
         </div>
+
+        {nutrition_html}
         
         <h2>Instructions</h2>
         <div class="steps">

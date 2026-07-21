@@ -1,7 +1,7 @@
 """Pydantic schemas for API request/response validation."""
 
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Optional, Any
 from datetime import datetime
 from .models import ItemLocation
 
@@ -19,6 +19,20 @@ class BarcodeCreate(BarcodeBase):
 class BarcodeResponse(BarcodeBase):
     id: int
     item_id: int
+    product_name: Optional[str] = None
+    brands: Optional[str] = None
+    keywords: list[str] = []
+    ingredients_en: list[str] = []
+    ingredients_hierarchy_en: list[str] = []
+    ingredients_nl: list[str] = []
+    ingredients_hierarchy_nl: list[str] = []
+    allergens: list[str] = []
+    nutriments: dict[str, Any] = {}
+    energy_kcal_100g: Optional[float] = None
+    energy_kcal_serving: Optional[float] = None
+    last_scanned_at: Optional[datetime] = None
+    product_fetched_at: Optional[datetime] = None
+    is_active: bool = False
 
     class Config:
         from_attributes = True
@@ -32,12 +46,13 @@ class ItemBase(BaseModel):
 
 class ItemCreate(ItemBase):
     location: ItemLocation = ItemLocation.NEITHER
-    barcode: Optional[str] = None  # Optional barcode to associate on creation
+    barcode: Optional[str] = None
 
 
 class ItemResponse(ItemBase):
     id: int
     location: ItemLocation
+    active_barcode_id: Optional[int] = None
     barcodes: list[BarcodeResponse] = []
 
     class Config:
@@ -47,44 +62,61 @@ class ItemResponse(ItemBase):
 class ItemUpdate(BaseModel):
     name: Optional[str] = None
     location: Optional[ItemLocation] = None
+    active_barcode_id: Optional[int] = None
+
+
+class SetActiveBarcodeRequest(BaseModel):
+    barcode_id: int
 
 
 # --- Barcode Lookup Response ---
 
 class BarcodeLookupResponse(BaseModel):
-    """Response when looking up a barcode."""
     found: bool
     barcode: Optional[str] = None
     item: Optional[ItemResponse] = None
+    # Populated when barcode is unknown but Open Food Facts has a match
+    suggested_name: Optional[str] = None
+    suggested_brands: Optional[str] = None
 
-
-# --- Move Item Request ---
 
 class MoveItemRequest(BaseModel):
-    """Request to move an item to a different location."""
     location: ItemLocation
 
 
-# --- Associate Barcode Request ---
-
 class AssociateBarcodeRequest(BaseModel):
-    """Request to associate a barcode with an existing item."""
     barcode: str
     item_id: int
 
 
-# --- Home Assistant Compatible Responses ---
-
 class InventoryListResponse(BaseModel):
-    """Clean response for Home Assistant REST sensors."""
     count: int
     items: list[ItemResponse]
 
 
 class GroceryListResponse(BaseModel):
-    """Clean response for Home Assistant REST sensors."""
     count: int
     items: list[ItemResponse]
+
+
+# --- Settings ---
+
+class SettingsResponse(BaseModel):
+    auto_fetch_products: bool = True
+    translate_ingredients: bool = True
+    gemini_configured: bool = False
+
+
+class SettingsUpdate(BaseModel):
+    auto_fetch_products: Optional[bool] = None
+    translate_ingredients: Optional[bool] = None
+
+
+class BarcodeReloadResult(BaseModel):
+    total: int
+    updated: int
+    not_found: int
+    errors: int
 
 
 # --- Recipe Schemas ---
@@ -97,11 +129,10 @@ class RecipeIngredientBase(BaseModel):
 
 
 class RecipeIngredientCreate(RecipeIngredientBase):
-    item_id: Optional[int] = None  # Optional link to inventory item
+    item_id: Optional[int] = None
 
 
 class MatchedItemInfo(BaseModel):
-    """Brief info about a matched inventory item."""
     id: int
     name: str
     location: ItemLocation
@@ -137,6 +168,13 @@ class RecipeStepResponse(RecipeStepBase):
         from_attributes = True
 
 
+class RecipeNutritionSummary(BaseModel):
+    totals: dict[str, float] = Field(default_factory=dict)
+    allergens: list[str] = Field(default_factory=list)
+    ingredients_included: list[str] = Field(default_factory=list)
+    ingredients_skipped: list[str] = Field(default_factory=list)
+
+
 class RecipeBase(BaseModel):
     name: str
     description: Optional[str] = None
@@ -158,6 +196,7 @@ class RecipeResponse(RecipeBase):
     created_at: datetime
     ingredients: list[RecipeIngredientResponse] = []
     steps: list[RecipeStepResponse] = []
+    nutrition: Optional[RecipeNutritionSummary] = None
 
     class Config:
         from_attributes = True
@@ -174,15 +213,11 @@ class RecipeUpdate(BaseModel):
 
 
 class RecipeListResponse(BaseModel):
-    """List of recipes."""
     count: int
     recipes: list[RecipeResponse]
 
 
-# --- Gemini Suggestion Schemas ---
-
 class GeminiRecipeSuggestion(BaseModel):
-    """A single recipe suggestion from Gemini."""
     name: str
     description: str
     servings: int = 4
@@ -193,35 +228,22 @@ class GeminiRecipeSuggestion(BaseModel):
 
 
 class GeminiRecipeSuggestionsResponse(BaseModel):
-    """Response containing recipe suggestions from Gemini."""
     suggestions: list[GeminiRecipeSuggestion]
-    inventory_used: list[str]  # Items from inventory that were considered
+    inventory_used: list[str]
 
 
 class GeminiGrocerySuggestion(BaseModel):
-    """A single grocery suggestion."""
     item_name: str
-    reason: str  # Why this is suggested (e.g., "needed for Pasta Carbonara")
+    reason: str
 
 
 class GeminiGrocerySuggestionsResponse(BaseModel):
-    """Response containing grocery suggestions from Gemini."""
     suggestions: list[GeminiGrocerySuggestion]
-    based_on_recipes: list[str]  # Recipe names considered
-    current_inventory: list[str]  # What's already in inventory
+    based_on_recipes: list[str]
+    current_inventory: list[str]
 
-
-# --- Spoonacular Schemas ---
-
-class SpoonacularByIngredientsRequest(BaseModel):
-    """Request for discovering recipes by ingredients."""
-    number: int = 10
-
-
-# --- Recipe Full Update Schema ---
 
 class RecipeFullUpdate(BaseModel):
-    """Full update for a recipe including ingredients and steps."""
     name: Optional[str] = None
     description: Optional[str] = None
     servings: Optional[int] = None

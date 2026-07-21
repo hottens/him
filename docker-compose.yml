@@ -20,8 +20,8 @@ services:
       - DATABASE_PATH=/data/inventory.db
       # Set your Gemini API key for AI features (optional)
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      # Set your Spoonacular API key for recipe browsing (optional)
-      - SPOONACULAR_API_KEY=${SPOONACULAR_API_KEY:-}
+      # Open Food Facts User-Agent (recommended)
+      - OFF_USER_AGENT=${OFF_USER_AGENT:-HomeInventoryManager/1.0 (local)}
 
 volumes:
   inventory_data:
