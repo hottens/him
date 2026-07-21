@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.orm import Session
 from typing import Optional
+import json
 import os
 
 from sqlalchemy import text
@@ -57,6 +58,15 @@ def run_migrations():
             _add_column_if_missing(conn, "barcodes", col, typ)
         conn.commit()
 
+
+        # Add Open Food Facts product info columns to items table
+        result = conn.execute(text("PRAGMA table_info(items)"))
+        item_columns = [row[1] for row in result.fetchall()]
+
+        for column in ("category", "nutri_score", "nutriments", "ingredients_text", "allergens"):
+            if column not in item_columns:
+                conn.execute(text(f"ALTER TABLE items ADD COLUMN {column} VARCHAR"))
+        conn.commit()
 
 run_migrations()
 
@@ -217,6 +227,70 @@ async def fetch_barcode_product(barcode_id: int, db: Session = Depends(get_db)):
     db.refresh(barcode)
     active_id = barcode.item.active_barcode_id if barcode.item else None
     return serialize_barcode(barcode, active_id)
+
+
+# --- Barcode Scan (with Open Food Facts enrichment) ---
+
+def _apply_off_info(item: Item, info: dict) -> None:
+    """Fill missing product-info fields on an item from Open Food Facts data."""
+    if not item.category and info.get("category"):
+        item.category = info["category"]
+    if not item.nutri_score and info.get("nutri_score"):
+        item.nutri_score = info["nutri_score"]
+    if not item.nutriments and info.get("nutriments"):
+        item.nutriments = json.dumps(info["nutriments"])
+    if not item.ingredients_text and info.get("ingredients_text"):
+        item.ingredients_text = info["ingredients_text"]
+    if not item.allergens and info.get("allergens"):
+        item.allergens = info["allergens"]
+
+
+@app.post("/api/scan", response_model=schemas.ScanResponse)
+async def scan_barcode(request: schemas.ScanRequest, db: Session = Depends(get_db)):
+    """
+    Process a scanned barcode for a target location.
+
+    Known barcodes are moved to the requested location. For inventory scans we
+    query Open Food Facts to enrich the item (category-as-name plus nutritional
+    values, nutri-score, ingredients and allergens). Grocery scans of unknown
+    barcodes are left to the manual naming flow.
+    """
+    code = request.code
+    location = request.location
+
+    barcode = db.query(Barcode).filter(Barcode.code == code).first()
+    if barcode:
+        item = barcode.item
+        item.location = location
+        # Enrich inventory items lacking product info
+        if location == ItemLocation.INVENTORY and not item.category:
+            info = openfoodfacts_service.lookup_product(code)
+            if info:
+                _apply_off_info(item, info)
+        db.commit()
+        db.refresh(item)
+        return schemas.ScanResponse(found=True, item=item)
+
+    # Unknown barcode: only inventory scans get auto-created from Open Food Facts
+    if location == ItemLocation.INVENTORY:
+        info = openfoodfacts_service.lookup_product(code)
+        if info and info.get("name"):
+            # Category is used as the name; group under an existing item if the
+            # name already exists (Item.name is unique).
+            item = db.query(Item).filter(Item.name == info["name"]).first()
+            if item:
+                item.location = ItemLocation.INVENTORY
+            else:
+                item = Item(name=info["name"], location=ItemLocation.INVENTORY)
+                db.add(item)
+                db.flush()
+            _apply_off_info(item, info)
+            db.add(Barcode(code=code, item_id=item.id))
+            db.commit()
+            db.refresh(item)
+            return schemas.ScanResponse(found=False, created=True, item=item)
+
+    return schemas.ScanResponse(found=False, needs_manual=True)
 
 
 # --- Item Endpoints ---
@@ -766,13 +840,13 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     if total_ingredients == 0:
         availability_html = ""
     elif len(missing_ingredients) == 0:
-        availability_html = f'<div class="availability-banner complete">✓ All {total_ingredients} ingredients in stock!</div>'
+        availability_html = f'<div class="availability-banner complete">✓ Alle {total_ingredients} ingrediënten in voorraad!</div>'
     else:
         availability_html = f'''
         <div class="availability-banner partial">
-            <span>◐ {available_count}/{total_ingredients} ingredients in stock</span>
+            <span>◐ {available_count}/{total_ingredients} ingrediënten in voorraad</span>
             <button class="add-missing-btn" onclick="addMissingToGrocery()">
-                🛒 Add {len(missing_ingredients)} missing to grocery
+                🛒 {len(missing_ingredients)} ontbrekende toevoegen aan boodschappen
             </button>
         </div>
         '''
@@ -820,7 +894,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
 
     html = f"""
 <!DOCTYPE html>
-<html lang="en">
+<html lang="nl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1541,9 +1615,9 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
 </head>
 <body>
     <div class="header-row">
-        <a href="/" class="back-link">← Back to Inventory</a>
+        <a href="/?tab=recipes" class="back-link">← Terug naar overzicht</a>
         <button class="edit-btn" onclick="toggleEditMode()" id="edit-toggle-btn">
-            ✏️ Edit
+            ✏️ Bewerken
         </button>
     </div>
     
@@ -1555,25 +1629,25 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         
         <div class="meta">
             <div class="meta-item">
-                <span class="meta-label">Servings</span>
+                <span class="meta-label">Porties</span>
                 <span class="meta-value">{recipe.servings}</span>
             </div>
             <div class="meta-item">
-                <span class="meta-label">Prep</span>
+                <span class="meta-label">Voorbereiding</span>
                 <span class="meta-value">{recipe.prep_time_minutes or '—'} min</span>
             </div>
             <div class="meta-item">
-                <span class="meta-label">Cook</span>
+                <span class="meta-label">Koken</span>
                 <span class="meta-value">{recipe.cook_time_minutes or '—'} min</span>
             </div>
             <div class="meta-item">
-                <span class="meta-label">Total</span>
+                <span class="meta-label">Totaal</span>
                 <span class="meta-value">{time_str}</span>
             </div>
         </div>
         
-        <h2>Ingredients</h2>
-        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">Click an ingredient to link it to an inventory item</p>
+        <h2>Ingrediënten</h2>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">Klik op een ingrediënt om het te koppelen aan een voorraaditem</p>
         {availability_html}
         <div class="ingredients">
             <ul>
@@ -1583,42 +1657,42 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
 
         {nutrition_html}
         
-        <h2>Instructions</h2>
+        <h2>Bereidingswijze</h2>
         <div class="steps">
             <ol>
                 {steps_html}
             </ol>
         </div>
         
-        {'<div class="source-link"><a href="' + recipe.source_url + '" target="_blank" rel="noopener noreferrer">📎 View original recipe →</a></div>' if recipe.source_url else ''}
+        {'<div class="source-link"><a href="' + recipe.source_url + '" target="_blank" rel="noopener noreferrer">📎 Bekijk origineel recept →</a></div>' if recipe.source_url else ''}
     </div>
     
     <!-- EDIT MODE -->
     <div class="edit-mode">
         <div class="edit-section">
-            <div class="edit-section-title">Recipe Details</div>
+            <div class="edit-section-title">Receptgegevens</div>
             
             <div class="edit-form-group">
-                <label class="edit-label">Name</label>
+                <label class="edit-label">Naam</label>
                 <input type="text" class="edit-input" id="edit-name" value="{recipe.name}">
             </div>
             
             <div class="edit-form-group">
-                <label class="edit-label">Description</label>
+                <label class="edit-label">Beschrijving</label>
                 <textarea class="edit-textarea" id="edit-description">{recipe.description or ''}</textarea>
             </div>
             
             <div class="edit-row">
                 <div class="edit-form-group">
-                    <label class="edit-label">Servings</label>
+                    <label class="edit-label">Porties</label>
                     <input type="number" class="edit-input edit-input-small" id="edit-servings" value="{recipe.servings}">
                 </div>
                 <div class="edit-form-group">
-                    <label class="edit-label">Prep (min)</label>
+                    <label class="edit-label">Voorbereiding (min)</label>
                     <input type="number" class="edit-input edit-input-small" id="edit-prep" value="{recipe.prep_time_minutes or ''}">
                 </div>
                 <div class="edit-form-group">
-                    <label class="edit-label">Cook (min)</label>
+                    <label class="edit-label">Koken (min)</label>
                     <input type="number" class="edit-input edit-input-small" id="edit-cook" value="{recipe.cook_time_minutes or ''}">
                 </div>
             </div>
@@ -1626,29 +1700,29 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         
         <div class="edit-section">
             <div class="edit-section-header">
-                <div class="edit-section-title">Ingredients</div>
-                <button class="add-btn" onclick="addIngredient()">+ Add</button>
+                <div class="edit-section-title">Ingrediënten</div>
+                <button class="add-btn" onclick="addIngredient()">+ Toevoegen</button>
             </div>
             <div id="edit-ingredients-list"></div>
         </div>
         
         <div class="edit-section">
             <div class="edit-section-header">
-                <div class="edit-section-title">Instructions</div>
-                <button class="add-btn" onclick="addStep()">+ Add Step</button>
+                <div class="edit-section-title">Bereidingswijze</div>
+                <button class="add-btn" onclick="addStep()">+ Stap toevoegen</button>
             </div>
             <div id="edit-steps-list"></div>
         </div>
         
-        <button class="delete-recipe-btn" onclick="deleteRecipe()">🗑 Delete Recipe</button>
+        <button class="delete-recipe-btn" onclick="deleteRecipe()">🗑 Recept verwijderen</button>
         
         <div class="save-bar">
-            <button class="cancel-btn" onclick="cancelEdit()">Cancel</button>
-            <button class="save-btn" onclick="saveRecipe()" id="save-btn">Save Changes</button>
+            <button class="cancel-btn" onclick="cancelEdit()">Annuleren</button>
+            <button class="save-btn" onclick="saveRecipe()" id="save-btn">Wijzigingen opslaan</button>
         </div>
     </div>
     
-    <button class="favorite view-mode" onclick="toggleFavorite()" title="{'Remove from favorites' if recipe.is_favorite else 'Add to favorites'}">
+    <button class="favorite view-mode" onclick="toggleFavorite()" title="{'Verwijder uit favorieten' if recipe.is_favorite else 'Toevoegen aan favorieten'}">
         {'★' if recipe.is_favorite else '☆'}
     </button>
     
@@ -1670,11 +1744,11 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             
             if (body.classList.contains('editing')) {{
                 body.classList.remove('editing');
-                btn.textContent = '✏️ Edit';
+                btn.textContent = '✏️ Bewerken';
                 btn.classList.remove('active');
             }} else {{
                 body.classList.add('editing');
-                btn.textContent = '✏️ Editing';
+                btn.textContent = '✏️ Bezig met bewerken';
                 btn.classList.add('active');
                 renderEditIngredients();
                 renderEditSteps();
@@ -1686,14 +1760,14 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             editIngredients = JSON.parse(JSON.stringify(ingredientData));
             editSteps = {json.dumps([{"step_number": s.step_number, "instruction": s.instruction} for s in sorted_steps])};
             document.body.classList.remove('editing');
-            document.getElementById('edit-toggle-btn').textContent = '✏️ Edit';
+            document.getElementById('edit-toggle-btn').textContent = '✏️ Bewerken';
             document.getElementById('edit-toggle-btn').classList.remove('active');
         }}
         
         function renderEditIngredients() {{
             const container = document.getElementById('edit-ingredients-list');
             if (editIngredients.length === 0) {{
-                container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">No ingredients yet. Click "Add" to add one.</p>';
+                container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">Nog geen ingrediënten. Klik op "Toevoegen".</p>';
                 return;
             }}
             
@@ -1701,15 +1775,15 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 <div class="edit-item" data-idx="${{idx}}">
                     <div class="edit-item-content">
                         <div class="edit-item-row">
-                            <input type="text" class="amount-input" placeholder="Amt" value="${{ing.amount || ''}}" onchange="updateIngredient(${{idx}}, 'amount', this.value)">
-                            <input type="text" class="unit-input" placeholder="Unit" value="${{ing.unit || ''}}" onchange="updateIngredient(${{idx}}, 'unit', this.value)">
-                            <input type="text" placeholder="Ingredient name" value="${{ing.name}}" onchange="updateIngredient(${{idx}}, 'name', this.value)">
+                            <input type="text" class="amount-input" placeholder="Hvh" value="${{ing.amount || ''}}" onchange="updateIngredient(${{idx}}, 'amount', this.value)">
+                            <input type="text" class="unit-input" placeholder="Eenheid" value="${{ing.unit || ''}}" onchange="updateIngredient(${{idx}}, 'unit', this.value)">
+                            <input type="text" placeholder="Naam ingrediënt" value="${{ing.name}}" onchange="updateIngredient(${{idx}}, 'name', this.value)">
                         </div>
                         <div class="edit-item-row">
-                            <input type="text" placeholder="Notes (optional)" value="${{ing.notes || ''}}" onchange="updateIngredient(${{idx}}, 'notes', this.value)" style="flex: 1;">
+                            <input type="text" placeholder="Notities (optioneel)" value="${{ing.notes || ''}}" onchange="updateIngredient(${{idx}}, 'notes', this.value)" style="flex: 1;">
                         </div>
                     </div>
-                    <button class="remove-btn" onclick="removeIngredient(${{idx}})" title="Remove">✕</button>
+                    <button class="remove-btn" onclick="removeIngredient(${{idx}})" title="Verwijderen">✕</button>
                 </div>
             `).join('');
         }}
@@ -1737,15 +1811,15 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         function renderEditSteps() {{
             const container = document.getElementById('edit-steps-list');
             if (editSteps.length === 0) {{
-                container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">No steps yet. Click "Add Step" to add one.</p>';
+                container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">Nog geen stappen. Klik op "Stap toevoegen".</p>';
                 return;
             }}
             
             container.innerHTML = editSteps.map((step, idx) => `
                 <div class="edit-item" data-idx="${{idx}}">
                     <span class="step-number">${{idx + 1}}</span>
-                    <textarea class="step-textarea" placeholder="Describe this step..." onchange="updateStep(${{idx}}, this.value)">${{step.instruction}}</textarea>
-                    <button class="remove-btn" onclick="removeStep(${{idx}})" title="Remove">✕</button>
+                    <textarea class="step-textarea" placeholder="Beschrijf deze stap..." onchange="updateStep(${{idx}}, this.value)">${{step.instruction}}</textarea>
+                    <button class="remove-btn" onclick="removeStep(${{idx}})" title="Verwijderen">✕</button>
                 </div>
             `).join('');
         }}
@@ -1772,7 +1846,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         async function saveRecipe() {{
             const saveBtn = document.getElementById('save-btn');
             saveBtn.disabled = true;
-            saveBtn.textContent = 'Saving...';
+            saveBtn.textContent = 'Opslaan...';
             
             // Gather form data
             const name = document.getElementById('edit-name').value.trim();
@@ -1782,9 +1856,9 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             const cookTime = parseInt(document.getElementById('edit-cook').value) || null;
             
             if (!name) {{
-                showToast('Recipe name is required');
+                showToast('Receptnaam is verplicht');
                 saveBtn.disabled = false;
-                saveBtn.textContent = 'Save Changes';
+                saveBtn.textContent = 'Wijzigingen opslaan';
                 return;
             }}
             
@@ -1824,20 +1898,20 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 
                 if (!response.ok) {{
                     const err = await response.json();
-                    throw new Error(err.detail || 'Failed to save');
+                    throw new Error(err.detail || 'Opslaan mislukt');
                 }}
                 
-                showToast('Recipe saved!');
+                showToast('Recept opgeslagen!');
                 setTimeout(() => location.reload(), 800);
             }} catch (err) {{
                 showToast(err.message);
                 saveBtn.disabled = false;
-                saveBtn.textContent = 'Save Changes';
+                saveBtn.textContent = 'Wijzigingen opslaan';
             }}
         }}
         
         async function deleteRecipe() {{
-            if (!confirm('Are you sure you want to delete this recipe? This cannot be undone.')) {{
+            if (!confirm('Weet je zeker dat je dit recept wilt verwijderen? Dit kan niet ongedaan worden gemaakt.')) {{
                 return;
             }}
             
@@ -1846,12 +1920,12 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                     method: 'DELETE'
                 }});
                 
-                if (!response.ok) throw new Error('Failed to delete');
+                if (!response.ok) throw new Error('Verwijderen mislukt');
                 
-                showToast('Recipe deleted');
-                setTimeout(() => window.location.href = '/', 800);
+                showToast('Recept verwijderd');
+                setTimeout(() => window.location.href = '/?tab=recipes', 800);
             }} catch (err) {{
-                showToast('Failed to delete recipe');
+                showToast('Recept verwijderen mislukt');
             }}
         }}
         
@@ -1863,7 +1937,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         async function addMissingToGrocery() {{
             const btn = document.querySelector('.add-missing-btn');
             btn.disabled = true;
-            btn.textContent = 'Adding...';
+            btn.textContent = 'Toevoegen...';
             
             let added = 0;
             for (const ingredient of missingIngredients) {{
@@ -1903,8 +1977,8 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 }}
             }}
             
-            showToast(`Added ${{added}} items to grocery list`);
-            btn.textContent = '✓ Added to grocery';
+            showToast(`${{added}} items toegevoegd aan boodschappenlijst`);
+            btn.textContent = '✓ Toegevoegd aan boodschappen';
             
             // Reload after a moment to show updated status
             setTimeout(() => location.reload(), 1500);
@@ -1924,14 +1998,14 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             // Build dropdown content
             dropdown.innerHTML = `
                 <div class="dropdown-search">
-                    <input type="text" placeholder="Search items..." oninput="filterDropdownItems(${{ingId}}, this.value)" autofocus>
+                    <input type="text" placeholder="Zoek items..." oninput="filterDropdownItems(${{ingId}}, this.value)" autofocus>
                 </div>
                 <div class="dropdown-items" id="dropdown-items-${{ingId}}">
                     ${{renderDropdownItems(ingId, '')}}
                 </div>
                 <div class="dropdown-footer">
-                    ${{ing.item_id ? `<button class="btn-clear-match" onclick="clearMatch(${{ingId}})">✕ Clear match</button>` : ''}}
-                    <button class="btn-add-grocery" onclick="addIngredientToGrocery(${{ingId}})">🛒 Add "${{ing.name}}" to grocery</button>
+                    ${{ing.item_id ? `<button class="btn-clear-match" onclick="clearMatch(${{ingId}})">✕ Koppeling wissen</button>` : ''}}
+                    <button class="btn-add-grocery" onclick="addIngredientToGrocery(${{ingId}})">🛒 "${{ing.name}}" aan boodschappen</button>
                 </div>
             `;
             
@@ -1954,7 +2028,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             );
             
             if (filtered.length === 0) {{
-                return '<div class="dropdown-item no-match">No items found</div>';
+                return '<div class="dropdown-item no-match">Geen items gevonden</div>';
             }}
             
             return filtered.map(item => {{
@@ -2017,12 +2091,12 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                     body: JSON.stringify({{ ingredients: updatedIngredients }})
                 }});
                 
-                if (!response.ok) throw new Error('Failed to save');
+                if (!response.ok) throw new Error('Opslaan mislukt');
                 
-                showToast('Match saved!');
+                showToast('Koppeling opgeslagen!');
                 setTimeout(() => location.reload(), 800);
             }} catch (err) {{
-                showToast('Failed to save match');
+                showToast('Koppeling opslaan mislukt');
             }}
         }}
         
@@ -2043,7 +2117,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 
                 if (!response.ok) {{
                     const err = await response.json();
-                    throw new Error(err.detail || 'Failed to add item');
+                    throw new Error(err.detail || 'Item toevoegen mislukt');
                 }}
                 
                 const newItem = await response.json();
@@ -2052,7 +2126,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 ing.item_id = newItem.id;
                 await saveIngredientMatch(ingId, newItem.id);
                 
-                showToast(`Added "${{ing.name}}" to grocery list`);
+                showToast(`"${{ing.name}}" toegevoegd aan boodschappenlijst`);
                 closeAllDropdowns();
             }} catch (err) {{
                 showToast(err.message);

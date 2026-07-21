@@ -54,6 +54,12 @@ class ItemResponse(ItemBase):
     location: ItemLocation
     active_barcode_id: Optional[int] = None
     barcodes: list[BarcodeResponse] = []
+    # Product info enriched from Open Food Facts (inventory scans only)
+    category: Optional[str] = None
+    nutri_score: Optional[str] = None
+    nutriments: Optional[str] = None
+    ingredients_text: Optional[str] = None
+    allergens: Optional[str] = None
 
     class Config:
         from_attributes = True
