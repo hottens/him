@@ -678,6 +678,23 @@
             color: var(--accent-red);
         }
 
+        /* Recipe Filter Bar */
+        .recipe-filter-bar {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .recipe-filter-bar .form-input {
+            flex: 1;
+        }
+
+        .recipe-fav-filter.active {
+            background: var(--accent-orange);
+            border-color: var(--accent-orange);
+            color: #fff;
+        }
+
         /* AI Suggestion Box */
         .ai-section {
             background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary));
@@ -907,42 +924,20 @@
             </div>
         </div>
 
-        <!-- Recepten Panel -->
+        <!-- Recepten Panel: alle recepten + favorietenfilter + import -->
         <div id="recipes" class="panel">
-            <!-- Sub-tabs for recipes -->
-            <div class="sub-tabs">
-                <button class="sub-tab active" data-subtab="favorites-section">⭐ Favorites<span class="count" id="favorites-count">0</span></button>
-                <button class="sub-tab" data-subtab="all-recipes-section">📖 All</button>
-                <button class="sub-tab" data-subtab="discover-section">🔍 Discover</button>
-            </div>
-
-            <!-- Favorites Section -->
-            <div id="favorites-section" class="sub-panel active">
-                <div id="favorites-list"></div>
-            </div>
-
-            <!-- All Recipes Section -->
-            <div id="all-recipes-section" class="sub-panel">
-                <div id="recipe-list"></div>
-            </div>
-
-            <!-- Discover Section -->
-            <div id="discover-section" class="sub-panel">
-                <!-- Gemini AI Suggestions -->
-                <div class="ai-section" style="border-color: var(--accent-purple); margin-bottom: 1rem;">
-                    <h3 style="color: var(--accent-purple);">✨ AI Recipe Ideas</h3>
-                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
-                        Get creative recipe suggestions from Gemini AI
-                    </p>
-                    <div class="form-group" style="margin-bottom: 0.75rem;">
-                        <input type="text" class="form-input" id="gemini-query-input" 
-                               placeholder="Optional: soup, Italian, quick meals...">
-                    </div>
-                    <button class="btn btn-purple btn-block" onclick="getGeminiRecipes()" id="gemini-recipe-btn">
-                        ✨ Generate Recipe Ideas
-                    </button>
+            <div class="manual-add-section">
+                <h3 style="font-size: 0.9rem; margin-bottom: 0.75rem; color: var(--text-secondary);">📎 Importeren via URL</h3>
+                <div class="manual-add-row">
+                    <input type="text" class="form-input" id="recipe-url-input"
+                           placeholder="Plak recept-URL...">
+                    <button class="btn btn-primary" onclick="importRecipeFromUrl()" id="import-url-btn">Importeren</button>
                 </div>
-                <div id="gemini-results"></div>
+            </div>
+
+            <div class="recipe-filter-bar">
+                <input type="text" class="form-input" id="recipe-search-input" placeholder="Zoek recepten...">
+                <button class="btn recipe-fav-filter" id="recipe-fav-filter" onclick="toggleFavFilter()" title="Alleen favorieten">☆</button>
             </div>
 
             <div id="recipe-list"></div>
@@ -1134,12 +1129,21 @@
             document.getElementById('grocery-add-input').addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') quickAddToGrocery();
             });
+            const recipeUrlInput = document.getElementById('recipe-url-input');
+            if (recipeUrlInput) {
+                recipeUrlInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') importRecipeFromUrl();
+                });
+            }
 
             // Recipe search filter
-            document.getElementById('recipe-search-input').addEventListener('input', (e) => {
-                recipeSearchQuery = e.target.value.trim().toLowerCase();
-                renderRecipes();
-            });
+            const recipeSearchInput = document.getElementById('recipe-search-input');
+            if (recipeSearchInput) {
+                recipeSearchInput.addEventListener('input', (e) => {
+                    recipeSearchQuery = e.target.value.trim().toLowerCase();
+                    renderRecipes();
+                });
+            }
 
             // Restore the requested tab (e.g. returning from a recipe page)
             const requestedTab = new URLSearchParams(window.location.search).get('tab');
@@ -1564,20 +1568,23 @@
         }
 
         function renderItemCard(item, currentList) {
-            const activeBarcode = item.barcodes.find(b => b.is_active);
+            const barcodes = item.barcodes || [];
+            const activeBarcode = barcodes.find(b => b.is_active);
             const productLabel = activeBarcode && (activeBarcode.product_name || activeBarcode.brands)
                 ? (activeBarcode.product_name || activeBarcode.brands)
                 : null;
-            const barcodesLine = item.barcodes.length
-                ? item.barcodes.map(b => `${b.is_active ? '★ ' : ''}${b.code}`).join(', ')
+            const barcodesLine = barcodes.length
+                ? barcodes.map(b => `${b.is_active ? '★ ' : ''}${b.code}`).join(', ')
                 : '';
+
+            const safeName = String(item.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
             return `
                 <div class="item-card">
-                    <div class="item-info" onclick="openEditItemModal(${item.id}, '${item.name.replace(/'/g, "\\'")}', '${item.location}')" style="cursor: pointer;">
-                        <div class="item-name">${item.name}</div>
+                    <div class="item-info" onclick="openEditItemModal(${item.id}, '${safeName}', '${item.location}')" style="cursor: pointer;">
+                        <div class="item-name">${escapeHtml(item.name)}</div>
                         ${productLabel ? `<div class="item-product">${escapeHtml(productLabel)}</div>` : ''}
-                        ${barcodesLine ? `<div class="item-barcodes">${barcodesLine}</div>` : ''}
+                        ${barcodesLine ? `<div class="item-barcodes">${escapeHtml(barcodesLine)}</div>` : ''}
                     </div>
                     <div class="item-actions">
                         ${currentList === 'inventory' ? `
@@ -1586,7 +1593,7 @@
                             <button class="btn btn-success btn-sm" onclick="moveItem(${item.id}, 'inventory')" title="Naar voorraad">🏠</button>
                         `}
                         <button class="btn btn-sm" onclick="removeItem(${item.id})" title="Archiveren">📦</button>
-                        <button class="btn btn-sm" onclick="openEditItemModal(${item.id}, '${item.name.replace(/'/g, "\\'")}', '${item.location}')" title="Bewerken">✏️</button>
+                        <button class="btn btn-sm" onclick="openEditItemModal(${item.id}, '${safeName}', '${item.location}')" title="Bewerken">✏️</button>
                     </div>
                 </div>
             `;
@@ -1695,9 +1702,52 @@
         function toggleFavFilter() {
             favFilterActive = !favFilterActive;
             const btn = document.getElementById('recipe-fav-filter');
-            btn.classList.toggle('active', favFilterActive);
-            btn.textContent = favFilterActive ? '★' : '☆';
+            if (btn) {
+                btn.classList.toggle('active', favFilterActive);
+                btn.textContent = favFilterActive ? '★' : '☆';
+            }
             renderRecipes();
+        }
+
+        // ========== Import Recipe from URL ==========
+        async function importRecipeFromUrl() {
+            const input = document.getElementById('recipe-url-input');
+            const btn = document.getElementById('import-url-btn');
+            const url = (input?.value || '').trim();
+
+            if (!url) {
+                showToast('Voer een recept-URL in', 'error');
+                return;
+            }
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                showToast('Voer een geldige URL in', 'error');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span>';
+
+            try {
+                const response = await fetch(`${API_BASE}/recipes/import-url`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.detail || 'Recept importeren mislukt');
+                }
+                const recipe = await response.json();
+                showToast(`Geïmporteerd: ${recipe.name}`, 'success');
+                input.value = '';
+                loadRecipes();
+                window.location.href = `/recipe/${recipe.id}`;
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Importeren';
+            }
         }
 
         // Toast Notifications
@@ -2134,7 +2184,6 @@
                 const saved = await response.json();
                 showToast(`Saved: ${saved.name}`, 'success');
                 loadRecipes();
-                loadFavorites();
 
                 // Navigate to the saved recipe
                 window.location.href = `/recipe/${saved.id}`;

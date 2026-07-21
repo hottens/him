@@ -295,3 +295,61 @@ Respond ONLY with valid JSON:
             "ingredients_hierarchy_nl": list(hierarchy),
         }
 
+
+
+def parse_recipe_from_url_content(url: str, page_text: str) -> dict:
+    """
+    Parse a recipe webpage into our local Dutch/metric recipe format via Gemini.
+    """
+    if not is_configured():
+        raise ValueError("GEMINI_API_KEY environment variable is not set")
+
+    model = get_model()
+    clipped = (page_text or "")[:20000]
+    prompt = f"""Parse this recipe webpage into a clean structured recipe.
+Translate EVERYTHING to Dutch and convert measurements to European metric units
+(gram, ml, stuks, eetlepel, theelepel).
+
+SOURCE URL: {url}
+
+PAGE TEXT:
+{clipped}
+
+Respond ONLY with valid JSON:
+{{
+  "name": "Nederlandse receptnaam",
+  "description": "Korte beschrijving in het Nederlands",
+  "servings": 4,
+  "prep_time_minutes": null,
+  "cook_time_minutes": null,
+  "ingredients": [
+    {{"name": "ingrediënt", "amount": "200", "unit": "gram", "notes": null}}
+  ],
+  "steps": [
+    {{"step_number": 1, "instruction": "Nederlandse instructie..."}}
+  ]
+}}"""
+
+    try:
+        response = model.generate_content(prompt)
+        result = json.loads(_extract_json_text(response.text))
+        result["source_url"] = url
+        if not result.get("name"):
+            result["name"] = "Geïmporteerd recept"
+        if not isinstance(result.get("ingredients"), list):
+            result["ingredients"] = []
+        if not isinstance(result.get("steps"), list):
+            result["steps"] = []
+        return result
+    except Exception as e:
+        return {
+            "error": str(e),
+            "name": "Geïmporteerd recept",
+            "description": None,
+            "servings": 4,
+            "prep_time_minutes": None,
+            "cook_time_minutes": None,
+            "ingredients": [],
+            "steps": [],
+            "source_url": url,
+        }

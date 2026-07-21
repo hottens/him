@@ -546,6 +546,93 @@ async def toggle_favorite(recipe_id: int, db: Session = Depends(get_db)):
     return serialize_recipe(recipe)
 
 
+class ImportUrlRequest(schemas.BaseModel):
+    """Request to import a recipe from a URL."""
+    url: str
+
+
+@app.post("/api/recipes/import-url", response_model=schemas.RecipeResponse)
+async def import_recipe_from_url(request: ImportUrlRequest, db: Session = Depends(get_db)):
+    """
+    Import a recipe from a website URL.
+
+    Fetches the page and uses Gemini to parse it into a structured Dutch recipe.
+    Requires GEMINI_API_KEY.
+    """
+    import re
+    import requests as http_requests
+
+    if not gemini_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Gemini API is not configured. Set GEMINI_API_KEY environment variable.",
+        )
+
+    url = (request.url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
+
+    try:
+        page = http_requests.get(
+            url,
+            timeout=15,
+            headers={"User-Agent": "HomeInventoryManager/1.0 (recipe-import)"},
+        )
+        page.raise_for_status()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not fetch URL: {e}") from e
+
+    # Strip scripts/styles to keep the Gemini prompt smaller
+    text_body = re.sub(
+        r"(?is)<(script|style|noscript|svg)[^>]*>.*?</\1>",
+        " ",
+        page.text,
+    )
+    text_body = re.sub(r"(?is)<[^>]+>", " ", text_body)
+    text_body = re.sub(r"\s+", " ", text_body).strip()
+
+    local_data = gemini_service.parse_recipe_from_url_content(url, text_body)
+    if local_data.get("error") and not local_data.get("ingredients") and not local_data.get("steps"):
+        raise HTTPException(status_code=500, detail=f"Failed to parse recipe: {local_data['error']}")
+
+    db_recipe = Recipe(
+        name=local_data["name"],
+        description=local_data.get("description"),
+        servings=local_data.get("servings") or 4,
+        prep_time_minutes=local_data.get("prep_time_minutes"),
+        cook_time_minutes=local_data.get("cook_time_minutes"),
+        source_url=local_data.get("source_url") or url,
+        is_favorite=False,
+    )
+    db.add(db_recipe)
+    db.flush()
+
+    for ing in local_data.get("ingredients", []):
+        if not ing.get("name"):
+            continue
+        db.add(RecipeIngredient(
+            recipe_id=db_recipe.id,
+            name=ing.get("name", ""),
+            amount=str(ing["amount"]) if ing.get("amount") is not None else None,
+            unit=ing.get("unit"),
+            notes=ing.get("notes"),
+        ))
+
+    for step in local_data.get("steps", []):
+        instruction = step.get("instruction") or ""
+        if not instruction:
+            continue
+        db.add(RecipeStep(
+            recipe_id=db_recipe.id,
+            step_number=int(step.get("step_number") or 1),
+            instruction=instruction,
+        ))
+
+    db.commit()
+    db.refresh(db_recipe)
+    return serialize_recipe(db_recipe)
+
+
 # --- Gemini AI Endpoints ---
 
 class RecipeSuggestionRequest(schemas.BaseModel):
