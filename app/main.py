@@ -44,6 +44,12 @@ async def root():
     return FileResponse(os.path.join(static_path, "index.html"))
 
 
+@app.get("/kiosk", include_in_schema=False)
+async def kiosk():
+    """Serve the kiosk (read/move-only) web interface."""
+    return FileResponse(os.path.join(static_path, "index.html"))
+
+
 # --- Health Check ---
 
 @app.get("/api/health")
@@ -822,7 +828,7 @@ async def get_grocery_suggestions(
 # --- Beautiful Recipe View Page ---
 
 @app.get("/recipe/{recipe_id}", response_class=HTMLResponse, include_in_schema=False)
-async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
+async def view_recipe_page(recipe_id: int, kiosk: bool = False, db: Session = Depends(get_db)):
     """Serve a beautiful, user-friendly recipe viewing page."""
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if not recipe:
@@ -860,7 +866,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             is_available = ing.name.lower() in inventory_names
             matched_name = None
         
-        status_icon = ""
+        status_icon = ("" if kiosk else ("✓" if is_available else "✗"))
         status_class = "available" if is_available else "missing"
         
         # Show matched item if different from ingredient name
@@ -874,7 +880,15 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 "item_id": ing.item_id
             })
         
-        ingredients_html += f"""<li class='{status_class}' data-ing-id='{ing.id}'>
+        if kiosk:
+            ingredients_html += f"""<li class='{status_class}' data-ing-id='{ing.id}'>
+            <span class='status-icon'>{status_icon}</span>
+            <div class='ingredient-content'>
+                {amount_str}{unit_str}<span class='ing-name' data-ing-name='{ing.id}'>{ing.name}</span>{notes_html}{match_info}
+            </div>
+        </li>"""
+        else:
+            ingredients_html += f"""<li class='{status_class}' data-ing-id='{ing.id}'>
             <span class='status-icon'>{status_icon}</span>
             <div class='ingredient-content' onclick='openIngredientDropdown({ing.id})'>
                 {amount_str}{unit_str}<span class='ing-name' data-ing-name='{ing.id}'>{ing.name}</span>{notes_html}{match_info}
@@ -919,13 +933,20 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     if total_ingredients == 0:
         availability_html = ""
     elif len(missing_ingredients) == 0:
-        availability_html = f'<div class="availability-banner complete">Alle {total_ingredients} ingrediënten in voorraad!</div>'
+        prefix = "" if kiosk else "✓ "
+        availability_html = f'<div class="availability-banner complete">{prefix}Alle {total_ingredients} ingrediënten in voorraad!</div>'
     else:
+        prefix = "" if kiosk else "◐ "
+        grocery_label = (
+            f"{len(missing_ingredients)} ontbrekende toevoegen aan boodschappen"
+            if kiosk
+            else f"🛒 {len(missing_ingredients)} ontbrekende toevoegen aan boodschappen"
+        )
         availability_html = f'''
         <div class="availability-banner partial">
-            <span>{available_count}/{total_ingredients} ingrediënten in voorraad</span>
+            <span>{prefix}{available_count}/{total_ingredients} ingrediënten in voorraad</span>
             <button class="add-missing-btn" onclick="addMissingToGrocery()">
-                {len(missing_ingredients)} ontbrekende toevoegen aan boodschappen
+                {grocery_label}
             </button>
         </div>
         '''
@@ -994,6 +1015,11 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         {allergens_html}
         {skipped_note}
         """
+
+    source_label = "Bekijk origineel recept →" if kiosk else "📎 Bekijk origineel recept →"
+    source_label_js = json.dumps(source_label)
+    back_href = f"/kiosk?tab=recipes&recipe={recipe.id}" if kiosk else f"/?tab=recipes&recipe={recipe.id}"
+    body_class = "kiosk" if kiosk else ""
 
     html = f"""
 <!DOCTYPE html>
@@ -1187,7 +1213,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         .ingredients li.missing .status-icon {{ color: var(--accent-red); }}
         .ingredients li.missing {{ color: var(--text-muted); }}
         
-        .status-icon {{
+        body.kiosk .status-icon {{
             display: inline-block;
             width: 0.55rem;
             height: 0.55rem;
@@ -1195,6 +1221,18 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             background: currentColor;
             flex-shrink: 0;
             margin-top: 0.45rem;
+        }}
+        
+        body.kiosk .ingredient-content {{
+            cursor: default;
+        }}
+        
+        body.kiosk .ingredient-content::after {{
+            display: none;
+        }}
+        
+        body.kiosk .no-kiosk {{
+            display: none !important;
         }}
         
         .matched-to {{
@@ -1287,7 +1325,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         }}
         
         .ingredient-content::after {{
-            content: 'Bewerk';
+            content: '✎';
             position: absolute;
             right: 0.5rem;
             top: 50%;
@@ -1438,15 +1476,13 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             position: fixed;
             bottom: 2rem;
             right: 2rem;
-            min-width: 56px;
-            height: 40px;
-            padding: 0 1rem;
-            border-radius: 20px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
             background: {'var(--accent)' if recipe.is_favorite else '#fff'};
             color: {'#fff' if recipe.is_favorite else 'var(--accent)'};
             border: 2px solid var(--accent);
-            font-size: 0.85rem;
-            font-weight: 600;
+            font-size: 1.5rem;
             cursor: pointer;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             transition: all 0.2s;
@@ -1845,16 +1881,16 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         }}
     </style>
 </head>
-<body>
+<body class="{body_class}">
     <div class="header-row">
-        <a href="/?tab=recipes&recipe={recipe.id}" class="back-link" data-i18n="back">← Terug naar overzicht</a>
+        <a href="{back_href}" class="back-link" data-i18n="back">← Terug naar overzicht</a>
         <div class="header-actions">
             <div class="lang-toggle" title="Taal / Language">
                 <button type="button" id="lang-nl" class="active" onclick="setRecipeLanguage('nl')">NL</button>
                 <button type="button" id="lang-en" onclick="setRecipeLanguage('en')">EN</button>
             </div>
-            <button class="edit-btn" onclick="toggleEditMode()" id="edit-toggle-btn">
-                Bewerken
+            <button class="edit-btn no-kiosk" onclick="toggleEditMode()" id="edit-toggle-btn">
+                ✏️ Bewerken
             </button>
         </div>
     </div>
@@ -1885,7 +1921,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         </div>
         
         <h2 data-i18n="ingredients">Ingrediënten</h2>
-        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;" data-i18n="link_hint">Klik op een ingrediënt om het te koppelen aan een voorraaditem</p>
+        <p class="no-kiosk" style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;" data-i18n="link_hint">Klik op een ingrediënt om het te koppelen aan een voorraaditem</p>
         {availability_html}
         <div class="ingredients">
             <ul>
@@ -1902,11 +1938,11 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             </ol>
         </div>
         
-        {'<div class="source-link"><button type="button" onclick="openSourceOverlay()" data-i18n="source">Bekijk origineel recept →</button></div>' if recipe.source_url else ''}
+        {'<div class="source-link"><button type="button" onclick="openSourceOverlay()" data-i18n="source">' + source_label + '</button></div>' if recipe.source_url else ''}
     </div>
     
     <!-- EDIT MODE -->
-    <div class="edit-mode">
+    <div class="edit-mode no-kiosk">
         <div class="edit-section">
             <div class="edit-section-title">Receptgegevens</div>
             
@@ -1952,7 +1988,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             <div id="edit-steps-list"></div>
         </div>
         
-        <button class="delete-recipe-btn" onclick="deleteRecipe()">Recept verwijderen</button>
+        <button class="delete-recipe-btn" onclick="deleteRecipe()">🗑 Recept verwijderen</button>
         
         <div class="save-bar">
             <button class="cancel-btn" onclick="cancelEdit()">Annuleren</button>
@@ -1960,8 +1996,8 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         </div>
     </div>
     
-    <button class="favorite view-mode" onclick="toggleFavorite()" title="{'Verwijder uit favorieten' if recipe.is_favorite else 'Toevoegen aan favorieten'}">
-        {'Favoriet' if recipe.is_favorite else 'Favoriet+'}
+    <button class="favorite view-mode no-kiosk" onclick="toggleFavorite()" title="{'Verwijder uit favorieten' if recipe.is_favorite else 'Toevoegen aan favorieten'}">
+        {'★' if recipe.is_favorite else '☆'}
     </button>
     
     {f'''
@@ -2002,7 +2038,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 allergens: 'Allergenen',
                 back: '← Terug naar overzicht',
                 link_hint: 'Klik op een ingrediënt om het te koppelen aan een voorraaditem',
-                source: 'Bekijk origineel recept →',
+                source: {source_label_js},
             }},
             nutrientLabels: {{
                 energy_kcal: 'Energie',
@@ -2148,11 +2184,11 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             
             if (body.classList.contains('editing')) {{
                 body.classList.remove('editing');
-                btn.textContent = 'Bewerken';
+                btn.textContent = '✏️ Bewerken';
                 btn.classList.remove('active');
             }} else {{
                 body.classList.add('editing');
-                btn.textContent = 'Bezig met bewerken';
+                btn.textContent = '✏️ Bezig met bewerken';
                 btn.classList.add('active');
                 renderEditIngredients();
                 renderEditSteps();
@@ -2164,7 +2200,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             editIngredients = JSON.parse(JSON.stringify(ingredientData));
             editSteps = {json.dumps([{"step_number": s.step_number, "instruction": s.instruction} for s in sorted_steps])};
             document.body.classList.remove('editing');
-            document.getElementById('edit-toggle-btn').textContent = 'Bewerken';
+            document.getElementById('edit-toggle-btn').textContent = '✏️ Bewerken';
             document.getElementById('edit-toggle-btn').classList.remove('active');
         }}
         
@@ -2187,7 +2223,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                             <input type="text" placeholder="Notities (optioneel)" value="${{ing.notes || ''}}" onchange="updateIngredient(${{idx}}, 'notes', this.value)" style="flex: 1;">
                         </div>
                     </div>
-                    <button class="remove-btn" onclick="removeIngredient(${{idx}})" title="Verwijderen">Verwijder</button>
+                    <button class="remove-btn" onclick="removeIngredient(${{idx}})" title="Verwijderen">✕</button>
                 </div>
             `).join('');
         }}
@@ -2223,7 +2259,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 <div class="edit-item" data-idx="${{idx}}">
                     <span class="step-number">${{idx + 1}}</span>
                     <textarea class="step-textarea" placeholder="Beschrijf deze stap..." onchange="updateStep(${{idx}}, this.value)">${{step.instruction}}</textarea>
-                    <button class="remove-btn" onclick="removeStep(${{idx}})" title="Verwijderen">Verwijder</button>
+                    <button class="remove-btn" onclick="removeStep(${{idx}})" title="Verwijderen">✕</button>
                 </div>
             `).join('');
         }}
@@ -2383,7 +2419,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             }}
             
             showToast(`${{added}} items toegevoegd aan boodschappenlijst`);
-            btn.textContent = 'Toegevoegd aan boodschappen';
+            btn.textContent = '✓ Toegevoegd aan boodschappen';
             
             // Reload after a moment to show updated status
             setTimeout(() => location.reload(), 1500);
@@ -2409,8 +2445,8 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                     ${{renderDropdownItems(ingId, '')}}
                 </div>
                 <div class="dropdown-footer">
-                    ${{ing.item_id ? `<button class="btn-clear-match" onclick="clearMatch(${{ingId}})">Koppeling wissen</button>` : ''}}
-                    <button class="btn-add-grocery" onclick="addIngredientToGrocery(${{ingId}})">"${{ing.name}}" aan boodschappen</button>
+                    ${{ing.item_id ? `<button class="btn-clear-match" onclick="clearMatch(${{ingId}})">✕ Koppeling wissen</button>` : ''}}
+                    <button class="btn-add-grocery" onclick="addIngredientToGrocery(${{ingId}})">🛒 "${{ing.name}}" aan boodschappen</button>
                 </div>
             `;
             
@@ -2561,7 +2597,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         }}
         
         // Check if we should auto-enter edit mode (from ?edit=1 query param)
-        if (new URLSearchParams(window.location.search).get('edit') === '1') {{
+        if (!document.body.classList.contains('kiosk') && new URLSearchParams(window.location.search).get('edit') === '1') {{
             toggleEditMode();
             // Clean up URL
             window.history.replaceState({{}}, '', window.location.pathname);

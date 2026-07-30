@@ -65,6 +65,10 @@
             gap: 0.5rem;
         }
 
+        header h1::before {
+            content: "📦";
+        }
+
         .settings-btn {
             background: none;
             border: none;
@@ -81,6 +85,34 @@
         .settings-btn:hover {
             opacity: 1;
             color: var(--text-primary);
+        }
+
+        .kiosk-only {
+            display: none;
+        }
+
+        body.kiosk .emoji {
+            display: none;
+        }
+
+        body.kiosk .kiosk-only {
+            display: inline;
+        }
+
+        body.kiosk .no-kiosk {
+            display: none !important;
+        }
+
+        body.kiosk header h1::before {
+            content: none;
+        }
+
+        body.kiosk .empty-state-icon {
+            display: none;
+        }
+
+        body.kiosk .item-info {
+            cursor: default !important;
         }
 
         /* Navigation Tabs */
@@ -377,6 +409,12 @@
             color: var(--text-secondary);
         }
 
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
         /* Modal */
         .modal-overlay {
             position: fixed;
@@ -651,14 +689,8 @@
             color: var(--text-secondary);
         }
 
-        .recipe-card .favorite-badge {
-            display: inline-block;
-            font-size: 0.7rem;
-            font-weight: 600;
+        .recipe-card .favorite-star {
             color: var(--accent-orange);
-            margin-right: 0.35rem;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
         }
 
         .recipe-card .ingredient-status {
@@ -911,14 +943,14 @@
 <body>
     <header>
         <div class="header-row">
-            <h1>Home Inventory</h1>
-            <button class="settings-btn" onclick="openSettingsModal()" title="Settings" aria-label="Settings">⚙</button>
+            <h1>Home Inventory Management</h1>
+            <button class="settings-btn no-kiosk" onclick="openSettingsModal()" title="Settings" aria-label="Settings">⚙</button>
         </div>
     </header>
 
     <nav class="tabs">
-        <button class="tab active" data-panel="items">Items<span class="count" id="items-count">0</span></button>
-        <button class="tab" data-panel="recipes">Recepten<span class="count" id="recipes-count">0</span></button>
+        <button class="tab active" data-panel="items"><span class="emoji">📦 </span>Items<span class="count" id="items-count">0</span></button>
+        <button class="tab" data-panel="recipes"><span class="emoji">🍳 </span>Recepten<span class="count" id="recipes-count">0</span></button>
     </nav>
 
     <main>
@@ -926,19 +958,19 @@
         <div id="items" class="panel active">
             <!-- Sub-tabs for Voorraad/Boodschappen -->
             <div class="sub-tabs">
-                <button class="sub-tab active" data-subtab="grocery-section">Boodschappen<span class="count" id="grocery-count">0</span></button>
-                <button class="sub-tab" data-subtab="inventory-section">Voorraad<span class="count" id="inventory-count">0</span></button>
+                <button class="sub-tab active" data-subtab="grocery-section"><span class="emoji">🛒 </span>Boodschappen<span class="count" id="grocery-count">0</span></button>
+                <button class="sub-tab" data-subtab="inventory-section"><span class="emoji">🏠 </span>Voorraad<span class="count" id="inventory-count">0</span></button>
             </div>
 
             <!-- Boodschappen Section -->
             <div id="grocery-section" class="sub-panel active">
-                <div class="manual-add-section">
+                <div class="manual-add-section no-kiosk">
                     <div class="manual-add-row">
                         <input type="text" class="form-input" id="grocery-add-input" 
                                placeholder="Toevoegen aan boodschappenlijst..." list="items-datalist">
                         <datalist id="items-datalist"></datalist>
                         <button class="btn btn-warning" onclick="quickAddToGrocery()">Toevoegen</button>
-                        <button class="btn btn-sm" onclick="openScanner('grocery_list')" title="Scannen">Scan</button>
+                        <button class="btn btn-sm" onclick="openScanner('grocery_list')" title="Scannen"><span class="emoji">📷</span><span class="kiosk-only">Scan</span></button>
                     </div>
                 </div>
                 
@@ -947,12 +979,12 @@
 
             <!-- Voorraad Section -->
             <div id="inventory-section" class="sub-panel">
-                <div class="manual-add-section">
+                <div class="manual-add-section no-kiosk">
                     <div class="manual-add-row">
                         <input type="text" class="form-input" id="inventory-add-input" 
                                placeholder="Toevoegen aan voorraad..." list="items-datalist">
                         <button class="btn btn-success" onclick="quickAddToInventory()">Toevoegen</button>
-                        <button class="btn btn-sm" onclick="openScanner('inventory')" title="Scannen">Scan</button>
+                        <button class="btn btn-sm" onclick="openScanner('inventory')" title="Scannen"><span class="emoji">📷</span><span class="kiosk-only">Scan</span></button>
                     </div>
                 </div>
                 
@@ -962,8 +994,8 @@
 
         <!-- Recepten Panel: alle recepten + favorietenfilter + import -->
         <div id="recipes" class="panel">
-            <div class="manual-add-section">
-                <h3 style="font-size: 0.9rem; margin-bottom: 0.75rem; color: var(--text-secondary);">Importeren via URL</h3>
+            <div class="manual-add-section no-kiosk">
+                <h3 style="font-size: 0.9rem; margin-bottom: 0.75rem; color: var(--text-secondary);"><span class="emoji">📎 </span>Importeren via URL</h3>
                 <div class="manual-add-row">
                     <input type="text" class="form-input" id="recipe-url-input"
                            placeholder="Plak recept-URL...">
@@ -972,8 +1004,8 @@
             </div>
 
             <div class="recipe-filter-bar">
-                <input type="text" class="form-input" id="recipe-search-input" placeholder="Zoek recepten...">
-                <button class="btn recipe-fav-filter" id="recipe-fav-filter" onclick="toggleFavFilter()" title="Alleen favorieten">Favorieten</button>
+                <input type="text" class="form-input no-kiosk" id="recipe-search-input" placeholder="Zoek recepten...">
+                <button class="btn recipe-fav-filter" id="recipe-fav-filter" onclick="toggleFavFilter()" title="Alleen favorieten"><span class="emoji">☆</span><span class="kiosk-only">Favorieten</span></button>
             </div>
 
             <div id="recipe-list"></div>
@@ -997,7 +1029,7 @@
                     <div id="reader"></div>
                     <div class="scanner-controls">
                         <button class="btn btn-primary btn-block" id="start-scanner" onclick="toggleScanner()">
-                            Start scanner
+                            📷 Start scanner
                         </button>
                     </div>
                     <div id="scanner-result" class="scanner-result" style="display: none;"></div>
@@ -1027,9 +1059,9 @@
                 </div>
 
                 <div class="location-buttons">
-                    <button class="btn btn-success" onclick="createItem('inventory')">Voorraad</button>
-                    <button class="btn btn-warning" onclick="createItem('grocery_list')">Boodschappen</button>
-                    <button class="btn" onclick="createItem('neither')">Archief</button>
+                    <button class="btn btn-success" onclick="createItem('inventory')">🏠 Voorraad</button>
+                    <button class="btn btn-warning" onclick="createItem('grocery_list')">🛒 Boodschappen</button>
+                    <button class="btn" onclick="createItem('neither')">📦 Archief</button>
                 </div>
             </div>
         </div>
@@ -1050,9 +1082,9 @@
                 <div class="form-group">
                     <label class="form-label">Locatie</label>
                     <select class="form-select" id="edit-item-location">
-                        <option value="inventory">Voorraad</option>
-                        <option value="grocery_list">Boodschappenlijst</option>
-                        <option value="neither">Archief</option>
+                        <option value="inventory">🏠 Voorraad</option>
+                        <option value="grocery_list">🛒 Boodschappenlijst</option>
+                        <option value="neither">📦 Archief</option>
                     </select>
                 </div>
                 <div class="form-group" id="edit-barcodes-group" style="display: none;">
@@ -1206,6 +1238,15 @@
         // API base URL
         const API_BASE = '/api';
         const LAST_RECIPE_KEY = 'him:lastRecipeId';
+        const IS_KIOSK = /^\/kiosk\/?$/.test(window.location.pathname);
+
+        if (IS_KIOSK) {
+            document.body.classList.add('kiosk');
+        }
+
+        function uiIcon(emoji, text) {
+            return IS_KIOSK ? text : emoji;
+        }
 
         function getUrlState() {
             const params = new URLSearchParams(window.location.search);
@@ -1262,6 +1303,10 @@
         function openRecipe(recipeId, edit = false) {
             setLastRecipeId(recipeId);
             syncUrlFromUi();
+            if (IS_KIOSK) {
+                window.location.href = `/recipe/${recipeId}?kiosk=1`;
+                return;
+            }
             window.location.href = edit
                 ? `/recipe/${recipeId}?edit=1`
                 : `/recipe/${recipeId}`;
@@ -1372,6 +1417,7 @@
 
         // Scanner Modal
         function openScanner(mode) {
+            if (IS_KIOSK) return;
             currentScanMode = mode;
             const modeIndicator = document.getElementById('current-mode');
             if (mode === 'inventory') {
@@ -1438,7 +1484,7 @@
             }
             
             isScanning = false;
-            btn.textContent = 'Start scanner';
+            btn.textContent = '📷 Start scanner';
             btn.classList.add('btn-primary');
         }
 
@@ -1527,9 +1573,9 @@
                     <div class="search-result-item" onclick="selectExistingItem(${item.id}, '${item.name.replace(/'/g, "\\'")}')">
                         ${item.name}
                         <small style="color: var(--text-secondary); display: block;">
-                            ${item.location === 'inventory' ? 'Voorraad' : 
-                              item.location === 'grocery_list' ? 'Boodschappen' : 
-                              'Archief'}
+                            ${item.location === 'inventory' ? '🏠 Voorraad' : 
+                              item.location === 'grocery_list' ? '🛒 Boodschappen' : 
+                              '📦 Archief'}
                         </small>
                     </div>
                 `).join('');
@@ -1652,9 +1698,9 @@
 
         function getLocationLabel(location) {
             const labels = {
-                'inventory': 'Voorraad',
-                'grocery_list': 'Boodschappen',
-                'neither': 'Archief'
+                'inventory': '🏠 Voorraad',
+                'grocery_list': '🛒 Boodschappen',
+                'neither': '📦 Archief'
             };
             return labels[location] || location;
         }
@@ -1709,6 +1755,7 @@
                 if (data.items.length === 0) {
                     listDiv.innerHTML = `
                         <div class="empty-state">
+                            <div class="empty-state-icon">🏠</div>
                             <p>Geen items in voorraad</p>
                         </div>
                     `;
@@ -1732,6 +1779,7 @@
                 if (data.items.length === 0) {
                     listDiv.innerHTML = `
                         <div class="empty-state">
+                            <div class="empty-state-icon">🛒</div>
                             <p>Boodschappenlijst is leeg</p>
                         </div>
                     `;
@@ -1750,26 +1798,33 @@
                 ? (activeBarcode.product_name || activeBarcode.brands)
                 : null;
             const barcodesLine = barcodes.length
-                ? barcodes.map(b => `${b.is_active ? '* ' : ''}${b.code}`).join(', ')
+                ? barcodes.map(b => `${b.is_active ? (IS_KIOSK ? '* ' : '★ ') : ''}${b.code}`).join(', ')
                 : '';
 
             const safeName = String(item.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const infoClick = IS_KIOSK
+                ? ''
+                : `onclick="openEditItemModal(${item.id}, '${safeName}', '${item.location}')" style="cursor: pointer;"`;
+
+            const moveBtn = currentList === 'inventory'
+                ? `<button class="btn btn-warning btn-sm" onclick="moveItem(${item.id}, 'grocery_list')" title="Naar boodschappen">${uiIcon('🛒', 'Naar boodschappen')}</button>`
+                : `<button class="btn btn-success btn-sm" onclick="moveItem(${item.id}, 'inventory')" title="Naar voorraad">${uiIcon('🏠', 'Naar voorraad')}</button>`;
+
+            const adminBtns = IS_KIOSK ? '' : `
+                <button class="btn btn-sm" onclick="removeItem(${item.id})" title="Archiveren">📦</button>
+                <button class="btn btn-sm" onclick="openEditItemModal(${item.id}, '${safeName}', '${item.location}')" title="Bewerken">✏️</button>
+            `;
 
             return `
                 <div class="item-card">
-                    <div class="item-info" onclick="openEditItemModal(${item.id}, '${safeName}', '${item.location}')" style="cursor: pointer;">
+                    <div class="item-info" ${infoClick}>
                         <div class="item-name">${escapeHtml(item.name)}</div>
                         ${productLabel ? `<div class="item-product">${escapeHtml(productLabel)}</div>` : ''}
                         ${barcodesLine ? `<div class="item-barcodes">${escapeHtml(barcodesLine)}</div>` : ''}
                     </div>
                     <div class="item-actions">
-                        ${currentList === 'inventory' ? `
-                            <button class="btn btn-warning btn-sm" onclick="moveItem(${item.id}, 'grocery_list')" title="Naar boodschappen">Boodschappen</button>
-                        ` : `
-                            <button class="btn btn-success btn-sm" onclick="moveItem(${item.id}, 'inventory')" title="Naar voorraad">Voorraad</button>
-                        `}
-                        <button class="btn btn-sm" onclick="removeItem(${item.id})" title="Archiveren">Archief</button>
-                        <button class="btn btn-sm" onclick="openEditItemModal(${item.id}, '${safeName}', '${item.location}')" title="Bewerken">Bewerk</button>
+                        ${moveBtn}
+                        ${adminBtns}
                     </div>
                 </div>
             `;
@@ -1824,8 +1879,9 @@
                     : 'Geen recepten gevonden';
                 listDiv.innerHTML = `
                     <div class="empty-state">
+                        <div class="empty-state-icon">📖</div>
                         <p>${emptyText}</p>
-                        ${allRecipes.length === 0 ? '<p style="font-size: 0.85rem; margin-top: 0.5rem;">Importeer een recept via URL hierboven.</p>' : ''}
+                        ${allRecipes.length === 0 && !IS_KIOSK ? '<p style="font-size: 0.85rem; margin-top: 0.5rem;">Importeer een recept via URL hierboven.</p>' : ''}
                     </div>
                 `;
                 return;
@@ -1839,13 +1895,19 @@
                     statusText = 'Geen ingrediënten opgegeven';
                 } else if (available === total) {
                     statusClass = 'complete';
-                    statusText = `Alle ${total} ingrediënten in voorraad (100%)`;
+                    statusText = IS_KIOSK
+                        ? `Alle ${total} ingrediënten in voorraad (100%)`
+                        : `✓ Alle ${total} ingrediënten in voorraad (100%)`;
                 } else if (available === 0) {
                     statusClass = 'missing';
-                    statusText = `0/${total} ingrediënten in voorraad (0%)`;
+                    statusText = IS_KIOSK
+                        ? `0/${total} ingrediënten in voorraad (0%)`
+                        : `✗ 0/${total} ingrediënten in voorraad (0%)`;
                 } else {
                     statusClass = 'partial';
-                    statusText = `${available}/${total} ingrediënten in voorraad (${Math.round(percentage * 100)}%)`;
+                    statusText = IS_KIOSK
+                        ? `${available}/${total} ingrediënten in voorraad (${Math.round(percentage * 100)}%)`
+                        : `◐ ${available}/${total} ingrediënten in voorraad (${Math.round(percentage * 100)}%)`;
                 }
 
                 const per100 = recipe.nutrition?.per_100g || {};
@@ -1863,11 +1925,19 @@
                     </div>
                 `;
 
+                const actions = IS_KIOSK ? '' : `
+                    <div style="display: flex; gap: 0.5rem; flex-shrink: 0;" onclick="event.stopPropagation();">
+                        <button class="btn btn-sm" onclick="openRecipe(${recipe.id}, true)" title="Bewerken">✏️</button>
+                        <button class="btn btn-sm" onclick="toggleFavoriteRecipe(${recipe.id})" title="${recipe.is_favorite ? 'Verwijder favoriet' : 'Maak favoriet'}">${recipe.is_favorite ? '★' : '☆'}</button>
+                        <button class="btn btn-sm" onclick="deleteRecipe(${recipe.id}, '${recipe.name.replace(/'/g, "\\'")}')" title="Verwijderen" style="color: var(--accent-red);">🗑</button>
+                    </div>
+                `;
+
                 return `
                     <div class="recipe-card" id="recipe-card-${recipe.id}" style="display: flex; justify-content: space-between; align-items: flex-start;">
                         <div onclick="openRecipe(${recipe.id})" style="flex: 1; cursor: pointer;">
                             <h3>
-                                ${recipe.is_favorite ? '<span class="favorite-badge">Favoriet</span> ' : ''}
+                                ${recipe.is_favorite && !IS_KIOSK ? '<span class="favorite-star">★</span> ' : ''}
                                 ${recipe.name}
                             </h3>
                             <div class="recipe-meta">
@@ -1880,11 +1950,7 @@
                                 ${statusText}
                             </div>
                         </div>
-                        <div style="display: flex; gap: 0.5rem; flex-shrink: 0;" onclick="event.stopPropagation();">
-                            <button class="btn btn-sm" onclick="openRecipe(${recipe.id}, true)" title="Bewerken">Bewerk</button>
-                            <button class="btn btn-sm" onclick="toggleFavoriteRecipe(${recipe.id})" title="${recipe.is_favorite ? 'Verwijder favoriet' : 'Maak favoriet'}">${recipe.is_favorite ? 'Favoriet' : 'Favoriet+'}</button>
-                            <button class="btn btn-sm" onclick="deleteRecipe(${recipe.id}, '${recipe.name.replace(/'/g, "\\'")}')" title="Verwijderen" style="color: var(--accent-red);">Verwijder</button>
-                        </div>
+                        ${actions}
                     </div>
                 `;
             }).join('');
@@ -1897,7 +1963,9 @@
             const btn = document.getElementById('recipe-fav-filter');
             if (btn) {
                 btn.classList.toggle('active', favFilterActive);
-                btn.textContent = 'Favorieten';
+                btn.innerHTML = IS_KIOSK
+                    ? 'Favorieten'
+                    : (favFilterActive ? '★' : '☆');
             }
             renderRecipes();
         }
