@@ -52,6 +52,15 @@ uvicorn app.main:app --host 0.0.0.0 --port 4269
 
 An item can have multiple barcodes. The last scanned barcode becomes active automatically. Tap an item to open the edit modal and pick another barcode as active (used for nutrition/allergens on recipes).
 
+### Managing items
+
+From the Inventory or Grocery tabs:
+- Tap **Boodschappen** to move an item to the grocery list
+- Tap **Voorraad** to move an item to inventory
+- Tap **Archief** to archive (remove from both lists, item stays in database)
+- Tap **Bewerk** to edit item name or delete it entirely
+- Click on item name to open edit modal
+
 ### Settings (⚙)
 
 - Auto-fetch product data from Open Food Facts

@@ -838,7 +838,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     sorted_steps = sorted(recipe.steps, key=lambda s: s.step_number)
     
     # Build ingredient data for JSON and HTML
-    import json
+    import html as html_module
     ingredient_data = []
     ingredients_html = ""
     missing_ingredients = []
@@ -860,7 +860,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             is_available = ing.name.lower() in inventory_names
             matched_name = None
         
-        status_icon = "✓" if is_available else "✗"
+        status_icon = ""
         status_class = "available" if is_available else "missing"
         
         # Show matched item if different from ingredient name
@@ -919,13 +919,13 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     if total_ingredients == 0:
         availability_html = ""
     elif len(missing_ingredients) == 0:
-        availability_html = f'<div class="availability-banner complete">✓ Alle {total_ingredients} ingrediënten in voorraad!</div>'
+        availability_html = f'<div class="availability-banner complete">Alle {total_ingredients} ingrediënten in voorraad!</div>'
     else:
         availability_html = f'''
         <div class="availability-banner partial">
-            <span>◐ {available_count}/{total_ingredients} ingrediënten in voorraad</span>
+            <span>{available_count}/{total_ingredients} ingrediënten in voorraad</span>
             <button class="add-missing-btn" onclick="addMissingToGrocery()">
-                🛒 {len(missing_ingredients)} ontbrekende toevoegen aan boodschappen
+                {len(missing_ingredients)} ontbrekende toevoegen aan boodschappen
             </button>
         </div>
         '''
@@ -1187,6 +1187,16 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         .ingredients li.missing .status-icon {{ color: var(--accent-red); }}
         .ingredients li.missing {{ color: var(--text-muted); }}
         
+        .status-icon {{
+            display: inline-block;
+            width: 0.55rem;
+            height: 0.55rem;
+            border-radius: 50%;
+            background: currentColor;
+            flex-shrink: 0;
+            margin-top: 0.45rem;
+        }}
+        
         .matched-to {{
             color: var(--text-muted);
             font-size: 0.85rem;
@@ -1277,7 +1287,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         }}
         
         .ingredient-content::after {{
-            content: '✎';
+            content: 'Bewerk';
             position: absolute;
             right: 0.5rem;
             top: 50%;
@@ -1352,7 +1362,11 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         }}
         
         .dropdown-item .item-icon {{
-            font-size: 0.9rem;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            min-width: 5.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
         }}
         
         .dropdown-item .item-name {{
@@ -1424,13 +1438,15 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             position: fixed;
             bottom: 2rem;
             right: 2rem;
-            width: 56px;
-            height: 56px;
-            border-radius: 50%;
+            min-width: 56px;
+            height: 40px;
+            padding: 0 1rem;
+            border-radius: 20px;
             background: {'var(--accent)' if recipe.is_favorite else '#fff'};
             color: {'#fff' if recipe.is_favorite else 'var(--accent)'};
             border: 2px solid var(--accent);
-            font-size: 1.5rem;
+            font-size: 0.85rem;
+            font-weight: 600;
             cursor: pointer;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             transition: all 0.2s;
@@ -1725,17 +1741,99 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             text-align: center;
         }}
         
-        .source-link a {{
+        .source-link button {{
+            background: none;
+            border: none;
             color: var(--accent);
             text-decoration: none;
             font-size: 0.9rem;
             font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
             transition: opacity 0.2s;
         }}
         
-        .source-link a:hover {{
+        .source-link button:hover {{
             opacity: 0.8;
             text-decoration: underline;
+        }}
+        
+        .source-overlay {{
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 500;
+            background: var(--bg);
+            flex-direction: column;
+        }}
+        
+        .source-overlay.active {{
+            display: flex;
+        }}
+        
+        .source-overlay-bar {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            background: #fff;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }}
+        
+        .source-overlay-bar .back-btn {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.5rem 0.85rem;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+        }}
+        
+        .source-overlay-bar .back-btn:hover {{
+            opacity: 0.9;
+        }}
+        
+        .source-overlay-bar .external-link {{
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            text-decoration: none;
+        }}
+        
+        .source-overlay-bar .external-link:hover {{
+            color: var(--accent);
+            text-decoration: underline;
+        }}
+        
+        .source-overlay iframe {{
+            flex: 1;
+            width: 100%;
+            border: none;
+            background: #fff;
+        }}
+        
+        .source-overlay-note {{
+            padding: 0.5rem 1rem;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            background: #fff;
+            border-bottom: 1px solid var(--border);
+            text-align: center;
+        }}
+        
+        body.source-open {{
+            overflow: hidden;
+        }}
+        
+        body.source-open .favorite {{
+            display: none;
         }}
         
         @media (max-width: 480px) {{
@@ -1749,14 +1847,14 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
 </head>
 <body>
     <div class="header-row">
-        <a href="/?tab=recipes" class="back-link" data-i18n="back">← Terug naar overzicht</a>
+        <a href="/?tab=recipes&recipe={recipe.id}" class="back-link" data-i18n="back">← Terug naar overzicht</a>
         <div class="header-actions">
             <div class="lang-toggle" title="Taal / Language">
                 <button type="button" id="lang-nl" class="active" onclick="setRecipeLanguage('nl')">NL</button>
                 <button type="button" id="lang-en" onclick="setRecipeLanguage('en')">EN</button>
             </div>
             <button class="edit-btn" onclick="toggleEditMode()" id="edit-toggle-btn">
-                ✏️ Bewerken
+                Bewerken
             </button>
         </div>
     </div>
@@ -1804,7 +1902,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             </ol>
         </div>
         
-        {'<div class="source-link"><a href="' + recipe.source_url + '" target="_blank" rel="noopener noreferrer" data-i18n="source">📎 Bekijk origineel recept →</a></div>' if recipe.source_url else ''}
+        {'<div class="source-link"><button type="button" onclick="openSourceOverlay()" data-i18n="source">Bekijk origineel recept →</button></div>' if recipe.source_url else ''}
     </div>
     
     <!-- EDIT MODE -->
@@ -1854,7 +1952,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             <div id="edit-steps-list"></div>
         </div>
         
-        <button class="delete-recipe-btn" onclick="deleteRecipe()">🗑 Recept verwijderen</button>
+        <button class="delete-recipe-btn" onclick="deleteRecipe()">Recept verwijderen</button>
         
         <div class="save-bar">
             <button class="cancel-btn" onclick="cancelEdit()">Annuleren</button>
@@ -1863,8 +1961,19 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
     </div>
     
     <button class="favorite view-mode" onclick="toggleFavorite()" title="{'Verwijder uit favorieten' if recipe.is_favorite else 'Toevoegen aan favorieten'}">
-        {'★' if recipe.is_favorite else '☆'}
+        {'Favoriet' if recipe.is_favorite else 'Favoriet+'}
     </button>
+    
+    {f'''
+    <div class="source-overlay" id="source-overlay" aria-hidden="true">
+        <div class="source-overlay-bar">
+            <button type="button" class="back-btn" onclick="closeSourceOverlay()">← Terug naar recept</button>
+            <a class="external-link" href="{html_module.escape(recipe.source_url, quote=True)}" target="_blank" rel="noopener noreferrer">Open in nieuw tabblad</a>
+        </div>
+        <div class="source-overlay-note">Sommige sites blokkeren inbedding. Gebruik dan &ldquo;Open in nieuw tabblad&rdquo; — daarna kun je hier terugkeren.</div>
+        <iframe id="source-iframe" title="Origineel recept" referrerpolicy="no-referrer"></iframe>
+    </div>
+    ''' if recipe.source_url else ''}
     
     <div class="toast" id="toast"></div>
     
@@ -1873,6 +1982,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
         const ingredientData = {ingredients_json};
         const allItems = {items_json};
         const recipeId = {recipe.id};
+        const sourceUrl = {json.dumps(recipe.source_url)};
         let currentLang = 'nl';
         const originalRecipe = {{
             name: {json.dumps(recipe.name)},
@@ -1892,7 +2002,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 allergens: 'Allergenen',
                 back: '← Terug naar overzicht',
                 link_hint: 'Klik op een ingrediënt om het te koppelen aan een voorraaditem',
-                source: '📎 Bekijk origineel recept →',
+                source: 'Bekijk origineel recept →',
             }},
             nutrientLabels: {{
                 energy_kcal: 'Energie',
@@ -1916,6 +2026,33 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             fiber: 'Fiber',
             salt: 'Salt',
         }};
+
+        try {{ localStorage.setItem('him:lastRecipeId', String(recipeId)); }} catch (e) {{}}
+
+        function openSourceOverlay() {{
+            if (!sourceUrl) return;
+            const overlay = document.getElementById('source-overlay');
+            const iframe = document.getElementById('source-iframe');
+            if (!overlay || !iframe) return;
+            if (!iframe.src) iframe.src = sourceUrl;
+            overlay.classList.add('active');
+            overlay.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('source-open');
+        }}
+
+        function closeSourceOverlay() {{
+            const overlay = document.getElementById('source-overlay');
+            if (!overlay) return;
+            overlay.classList.remove('active');
+            overlay.setAttribute('aria-hidden', 'true');
+            document.body.classList.remove('source-open');
+        }}
+
+        document.addEventListener('keydown', (e) => {{
+            if (e.key === 'Escape' && document.body.classList.contains('source-open')) {{
+                closeSourceOverlay();
+            }}
+        }});
 
         async function setRecipeLanguage(lang) {{
             if (lang === currentLang) return;
@@ -2011,11 +2148,11 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             
             if (body.classList.contains('editing')) {{
                 body.classList.remove('editing');
-                btn.textContent = '✏️ Bewerken';
+                btn.textContent = 'Bewerken';
                 btn.classList.remove('active');
             }} else {{
                 body.classList.add('editing');
-                btn.textContent = '✏️ Bezig met bewerken';
+                btn.textContent = 'Bezig met bewerken';
                 btn.classList.add('active');
                 renderEditIngredients();
                 renderEditSteps();
@@ -2027,7 +2164,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             editIngredients = JSON.parse(JSON.stringify(ingredientData));
             editSteps = {json.dumps([{"step_number": s.step_number, "instruction": s.instruction} for s in sorted_steps])};
             document.body.classList.remove('editing');
-            document.getElementById('edit-toggle-btn').textContent = '✏️ Bewerken';
+            document.getElementById('edit-toggle-btn').textContent = 'Bewerken';
             document.getElementById('edit-toggle-btn').classList.remove('active');
         }}
         
@@ -2050,7 +2187,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                             <input type="text" placeholder="Notities (optioneel)" value="${{ing.notes || ''}}" onchange="updateIngredient(${{idx}}, 'notes', this.value)" style="flex: 1;">
                         </div>
                     </div>
-                    <button class="remove-btn" onclick="removeIngredient(${{idx}})" title="Verwijderen">✕</button>
+                    <button class="remove-btn" onclick="removeIngredient(${{idx}})" title="Verwijderen">Verwijder</button>
                 </div>
             `).join('');
         }}
@@ -2086,7 +2223,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 <div class="edit-item" data-idx="${{idx}}">
                     <span class="step-number">${{idx + 1}}</span>
                     <textarea class="step-textarea" placeholder="Beschrijf deze stap..." onchange="updateStep(${{idx}}, this.value)">${{step.instruction}}</textarea>
-                    <button class="remove-btn" onclick="removeStep(${{idx}})" title="Verwijderen">✕</button>
+                    <button class="remove-btn" onclick="removeStep(${{idx}})" title="Verwijderen">Verwijder</button>
                 </div>
             `).join('');
         }}
@@ -2190,6 +2327,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                 if (!response.ok) throw new Error('Verwijderen mislukt');
                 
                 showToast('Recept verwijderd');
+                try {{ localStorage.removeItem('him:lastRecipeId'); }} catch (e) {{}}
                 setTimeout(() => window.location.href = '/?tab=recipes', 800);
             }} catch (err) {{
                 showToast('Recept verwijderen mislukt');
@@ -2245,7 +2383,7 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             }}
             
             showToast(`${{added}} items toegevoegd aan boodschappenlijst`);
-            btn.textContent = '✓ Toegevoegd aan boodschappen';
+            btn.textContent = 'Toegevoegd aan boodschappen';
             
             // Reload after a moment to show updated status
             setTimeout(() => location.reload(), 1500);
@@ -2271,8 +2409,8 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
                     ${{renderDropdownItems(ingId, '')}}
                 </div>
                 <div class="dropdown-footer">
-                    ${{ing.item_id ? `<button class="btn-clear-match" onclick="clearMatch(${{ingId}})">✕ Koppeling wissen</button>` : ''}}
-                    <button class="btn-add-grocery" onclick="addIngredientToGrocery(${{ingId}})">🛒 "${{ing.name}}" aan boodschappen</button>
+                    ${{ing.item_id ? `<button class="btn-clear-match" onclick="clearMatch(${{ingId}})">Koppeling wissen</button>` : ''}}
+                    <button class="btn-add-grocery" onclick="addIngredientToGrocery(${{ingId}})">"${{ing.name}}" aan boodschappen</button>
                 </div>
             `;
             
@@ -2299,14 +2437,14 @@ async def view_recipe_page(recipe_id: int, db: Session = Depends(get_db)):
             }}
             
             return filtered.map(item => {{
-                const icon = item.location === 'inventory' ? '🏠' : 
-                             item.location === 'grocery_list' ? '🛒' : '📦';
+                const locationLabel = item.location === 'inventory' ? 'Voorraad' : 
+                             item.location === 'grocery_list' ? 'Boodschappen' : 'Archief';
                 const isSelected = ing.item_id === item.id;
                 return `
                     <div class="dropdown-item ${{isSelected ? 'selected' : ''}}" onclick="selectItemMatch(${{ingId}}, ${{item.id}})">
-                        <span class="item-icon">${{icon}}</span>
+                        <span class="item-icon">${{locationLabel}}</span>
                         <span class="item-name">${{item.name}}</span>
-                        ${{isSelected ? '<span style="color: var(--accent);">✓</span>' : ''}}
+                        ${{isSelected ? '<span style="color: var(--accent);">Geselecteerd</span>' : ''}}
                     </div>
                 `;
             }}).join('');
